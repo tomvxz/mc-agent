@@ -3,10 +3,10 @@ const skills = require('./skills')
 const { observe } = require('./state')
 const { logTransition } = require('./logger')
 
-const attendre = (ms) => new Promise((r) => setTimeout(r, ms))
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
-// Si le bot est mort ou déconnecté, observe() plante : on note null au lieu de perdre la transition
-function observeSur(bot) {
+// If the bot is dead or disconnected, observe() throws: record null instead of losing the transition
+function safeObserve(bot) {
     try {
         return observe(bot)
     } catch (e) {
@@ -14,43 +14,43 @@ function observeSur(bot) {
     }
 }
 
-// Version du format des lignes du journal : à augmenter si on change leur forme (voir CLAUDE.md)
+// Version of the journal line format: bump it when the shape changes (see CLAUDE.md)
 const SCHEMA_VERSION = 1
 
-// meta (facultatif) : { episode_id, step } quand l'appel vient du cerveau, pour relier plan et résultats
+// meta (optional): { episode_id, step } when the call comes from the brain, to link plans and results
 async function execute(bot, name, args = {}, source = 'manual', meta = {}) {
-    const avant = observeSur(bot)
+    const before = safeObserve(bot)
 
     let result
-    let apres
+    let after
     if (Object.hasOwn(skills, name)) {
         result = await runSkill(bot, skills[name], args)
-        await attendre(300) // laisse l'inventaire se mettre à jour
-        apres = observeSur(bot)
+        await sleep(300) // let the inventory update
+        after = safeObserve(bot)
     } else {
-        // Nom inconnu : on ne lance rien, mais l'échec est quand même journalisé
+        // Unknown name: nothing runs, but the failure is still logged
         result = { success: false, reason: 'unknown_skill', details: {}, duration: 0 }
-        apres = avant
+        after = before
     }
 
-    // Écrire dans le journal ne doit jamais faire planter le bot
+    // Writing the journal must never crash the bot
     try {
         logTransition({
             schema_version: SCHEMA_VERSION,
             ts: new Date().toISOString(),
             source,
-            // Champs optionnels : absents des lignes qui ne viennent pas d'un épisode
+            // Optional fields: absent from lines that do not come from an episode
             ...(meta.episode_id !== undefined && { episode_id: meta.episode_id }),
             ...(meta.step !== undefined && { step: meta.step }),
-            state: avant,
+            state: before,
             skill: { name, args },
-            next_state: apres,
+            next_state: after,
             success: result.success,
             reason: result.reason,
             duration: result.duration,
         })
     } catch (e) {
-        console.error('[journal] écriture impossible :', e.message)
+        console.error('[journal] cannot write:', e.message)
     }
     return result
 }

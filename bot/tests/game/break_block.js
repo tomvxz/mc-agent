@@ -1,56 +1,56 @@
-const { poser, donner, CENTRE: C } = require('./arena')
+const { placeAndWait, giveAndWait, CENTER: C } = require('./arena')
 
-const bloc = (bot, x, y, z) => bot.blockAt(bot.entity.position.clone().set(x, y, z))
+const blockAt = (bot, x, y, z) => bot.blockAt(bot.entity.position.clone().set(x, y, z))
 
-// Vérifie que le bloc a disparu ET que l'objet attendu est arrivé dans l'inventaire
-const casseEtRamasse = ([x, y, z], objet) => (r, avant, apres, bot) => {
-    const b = bloc(bot, x, y, z)
-    if (b && b.name !== 'air') return `le bloc est toujours là (${b.name})`
-    const delta = (apres.inventory[objet] || 0) - (avant.inventory[objet] || 0)
-    return delta >= 1 || `${objet} +${delta}`
+// Check that the block is gone AND that the expected item reached the inventory
+const brokenAndCollected = ([x, y, z], item) => (r, before, after, bot) => {
+    const b = blockAt(bot, x, y, z)
+    if (b && b.name !== 'air') return `the block is still there (${b.name})`
+    const delta = (after.inventory[item] || 0) - (before.inventory[item] || 0)
+    return delta >= 1 || `${item} +${delta}`
 }
 
-// [nom, position, bloc posé, objet attendu, mise en place en plus]
-const CAS = [
-    ['bûche au sol', [C.x + 3, C.y, C.z], 'oak_log', 'oak_log'],
-    ['bûche en hauteur (y+3, dans le vide : l\'objet tombe au sol)', [C.x - 4, C.y + 3, C.z + 2], 'oak_log', 'oak_log'],
-    ['terre', [C.x + 6, C.y, C.z - 6], 'dirt', 'dirt'],
-    ['pierre avec une pioche', [C.x - 8, C.y, C.z - 3], 'stone', 'cobblestone', 'pioche'],
+// [name, position, block placed, expected item, extra setup]
+const CASES = [
+    ['log on the ground', [C.x + 3, C.y, C.z], 'oak_log', 'oak_log'],
+    ['log up high (y+3, floating: the item falls to the ground)', [C.x - 4, C.y + 3, C.z + 2], 'oak_log', 'oak_log'],
+    ['dirt', [C.x + 6, C.y, C.z - 6], 'dirt', 'dirt'],
+    ['stone with a pickaxe', [C.x - 8, C.y, C.z - 3], 'stone', 'cobblestone', 'pickaxe'],
 ]
 
-const nominaux = CAS.map(([nom, [x, y, z], matiere, objet, extra]) => ({
-    nom,
+const nominal = CASES.map(([name, [x, y, z], material, item, extra]) => ({
+    name,
     setup: async (bot) => {
-        await poser(bot, `/setblock ${x} ${y} ${z} ${matiere}`, [x, y, z], matiere)
-        if (extra === 'pioche') await donner(bot, 'wooden_pickaxe', 1)
+        await placeAndWait(bot, `/setblock ${x} ${y} ${z} ${material}`, [x, y, z], material)
+        if (extra === 'pickaxe') await giveAndWait(bot, 'wooden_pickaxe', 1)
     },
     args: { x, y, z },
-    verify: casseEtRamasse([x, y, z], objet),
+    verify: brokenAndCollected([x, y, z], item),
 }))
 
 const P = [C.x + 3, C.y, C.z]
 const H = [C.x - 4, C.y + 3, C.z + 2]
-const limites = [
+const edgeCases = [
     {
-        // L'objet retombe SUR la colonne, hors de portée : cassé (ok) mais collected est vide
-        nom: 'sommet d\'une colonne (objet inatteignable)',
-        setup: (bot) => poser(bot, `/fill ${H[0]} ${C.y} ${H[2]} ${H[0]} ${H[1]} ${H[2]} oak_log`, H, 'oak_log'),
+        // The item falls back ONTO the column, out of reach: broken (ok) but collected is empty
+        name: 'top of a column (item out of reach)',
+        setup: (bot) => placeAndWait(bot, `/fill ${H[0]} ${C.y} ${H[2]} ${H[0]} ${H[1]} ${H[2]} oak_log`, H, 'oak_log'),
         args: { x: H[0], y: H[1], z: H[2] },
         expect: 'ok',
     },
-    { nom: 'rien à casser (air)', args: { x: P[0], y: P[1], z: P[2] }, expect: 'nothing_to_break' },
+    { name: 'nothing to break (air)', args: { x: P[0], y: P[1], z: P[2] }, expect: 'nothing_to_break' },
     {
-        nom: 'barrière incassable',
-        setup: (bot) => poser(bot, `/setblock ${P.join(' ')} barrier`, P, 'barrier'),
+        name: 'unbreakable barrier',
+        setup: (bot) => placeAndWait(bot, `/setblock ${P.join(' ')} barrier`, P, 'barrier'),
         args: { x: P[0], y: P[1], z: P[2] },
         expect: 'unbreakable',
     },
     {
-        nom: 'pierre sans pioche',
-        setup: (bot) => poser(bot, `/setblock ${P.join(' ')} stone`, P, 'stone'),
+        name: 'stone without a pickaxe',
+        setup: (bot) => placeAndWait(bot, `/setblock ${P.join(' ')} stone`, P, 'stone'),
         args: { x: P[0], y: P[1], z: P[2] },
         expect: 'no_tool',
     },
 ]
 
-module.exports = { skill: 'break_block', nominaux, limites }
+module.exports = { skill: 'break_block', nominal, edgeCases }

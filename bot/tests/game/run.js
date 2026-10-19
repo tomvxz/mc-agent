@@ -1,96 +1,96 @@
-// Lance la suite de tests en jeu d'une compétence (ou de toutes).
-// Utilisation : node --env-file=../.env bot.js suite <compétence|all> [nombre d'essais]
+// Run the in-game test suite of one skill (or of all of them).
+// Usage: node --env-file=../.env bot.js suite <skill|all> [number of trials]
 //
-// - Cas "nominaux" : la compétence doit réussir. On en fait N essais (10 par défaut) et on
-//   calcule le taux de réussite (objectif >= 80 %). verify() contrôle le monde réel pour
-//   repérer les "faux succès" (la compétence dit ok mais rien n'a changé).
-// - Cas "limites" : un essai chacun, la compétence doit renvoyer exactement la raison attendue.
-// Tout passe par execute() : chaque essai est journalisé avec la source "test:<compétence>".
+// - "Nominal" cases: the skill must succeed. We run N trials (10 by default) and compute the
+//   success rate (target >= 80 %). verify() checks the real world to catch "false successes"
+//   (the skill says ok but nothing changed).
+// - "Edge" cases: one trial each, the skill must return exactly the expected reason.
+// Everything goes through execute(): every trial is logged with source "test:<skill>".
 
 const execute = require('../../src/execute')
 const { observe } = require('../../src/state')
-const { preparer, reinitialiser } = require('./arena')
+const { prepareArena, resetArena } = require('./arena')
 
 const SUITES = ['move_to', 'break_block', 'place_block', 'craft', 'eat', 'find', 'scan', 'explore', 'mine']
 
-// Un essai : mise en place, exécution, vérification
-async function essai(bot, skill, cas) {
-    await reinitialiser(bot)
+// One trial: setup, execution, verification
+async function runTrial(bot, skill, testCase) {
+    await resetArena(bot)
     try {
-        if (cas.setup) await cas.setup(bot)
+        if (testCase.setup) await testCase.setup(bot)
     } catch (e) {
-        return { etat: 'setup_failed', texte: e.message }
+        return { status: 'setup_failed', message: e.message }
     }
 
-    const avant = observe(bot)
-    const r = await execute(bot, skill, cas.args, `test:${skill}`)
-    const apres = observe(bot)
+    const before = observe(bot)
+    const r = await execute(bot, skill, testCase.args, `test:${skill}`)
+    const after = observe(bot)
 
-    let verifie = true
-    if (cas.verify && r.success) verifie = await cas.verify(r, avant, apres, bot)
-    return { r, verifie }
+    let verified = true
+    if (testCase.verify && r.success) verified = await testCase.verify(r, before, after, bot)
+    return { r, verified }
 }
 
-async function lancerSuite(bot, skill, n) {
-    const { nominaux, limites } = require(`./${skill}`)
-    const bilan = { skill, reussis: 0, essais: 0, fauxSucces: 0, setupRates: 0, limitesOk: 0, limitesTotal: limites.length }
-    console.log(`\n=== ${skill} : ${n} essais nominaux, ${limites.length} cas limites ===`)
+async function runSuite(bot, skill, n) {
+    const { nominal, edgeCases } = require(`./${skill}`)
+    const report = { skill, succeeded: 0, trials: 0, falseSuccesses: 0, setupFailures: 0, edgeOk: 0, edgeTotal: edgeCases.length }
+    console.log(`\n=== ${skill}: ${n} nominal trials, ${edgeCases.length} edge cases ===`)
 
     for (let i = 0; i < n; i++) {
-        const cas = nominaux[i % nominaux.length]
-        const res = await essai(bot, skill, cas)
-        if (res.etat === 'setup_failed') {
-            bilan.setupRates++
-            console.log(`  [${i + 1}] ${cas.nom} : MISE EN PLACE RATÉE (${res.texte}), non compté`)
+        const testCase = nominal[i % nominal.length]
+        const res = await runTrial(bot, skill, testCase)
+        if (res.status === 'setup_failed') {
+            report.setupFailures++
+            console.log(`  [${i + 1}] ${testCase.name}: SETUP FAILED (${res.message}), not counted`)
             continue
         }
-        bilan.essais++
-        const { r, verifie } = res
-        let marque = r.success ? 'OK' : 'ÉCHEC'
-        if (r.success && verifie !== true) {
-            bilan.fauxSucces++
-            marque = `FAUX SUCCÈS (${verifie})`
+        report.trials++
+        const { r, verified } = res
+        let mark = r.success ? 'OK' : 'FAILED'
+        if (r.success && verified !== true) {
+            report.falseSuccesses++
+            mark = `FALSE SUCCESS (${verified})`
         } else if (r.success) {
-            bilan.reussis++
+            report.succeeded++
         }
-        console.log(`  [${i + 1}] ${cas.nom} : ${marque} ${r.reason} ${r.duration}s ${JSON.stringify(r.details)}`)
+        console.log(`  [${i + 1}] ${testCase.name}: ${mark} ${r.reason} ${r.duration}s ${JSON.stringify(r.details)}`)
     }
 
-    for (const cas of limites) {
-        const res = await essai(bot, skill, cas)
-        if (res.etat === 'setup_failed') {
-            console.log(`  [limite] ${cas.nom} : MISE EN PLACE RATÉE (${res.texte})`)
+    for (const testCase of edgeCases) {
+        const res = await runTrial(bot, skill, testCase)
+        if (res.status === 'setup_failed') {
+            console.log(`  [edge] ${testCase.name}: SETUP FAILED (${res.message})`)
             continue
         }
-        const ok = res.r.reason === cas.expect
-        if (ok) bilan.limitesOk++
-        console.log(`  [limite] ${cas.nom} : ${ok ? 'OK' : 'INATTENDU'} attendu=${cas.expect} obtenu=${res.r.reason}`)
+        const ok = res.r.reason === testCase.expect
+        if (ok) report.edgeOk++
+        console.log(`  [edge] ${testCase.name}: ${ok ? 'OK' : 'UNEXPECTED'} expected=${testCase.expect} got=${res.r.reason}`)
     }
 
-    const taux = bilan.essais ? Math.round((100 * bilan.reussis) / bilan.essais) : 0
-    const valide = taux >= 80 && bilan.fauxSucces === 0 && bilan.limitesOk === bilan.limitesTotal
+    const rate = report.trials ? Math.round((100 * report.succeeded) / report.trials) : 0
+    const passed = rate >= 80 && report.falseSuccesses === 0 && report.edgeOk === report.edgeTotal
     console.log(
-        `--- ${skill} : ${bilan.reussis}/${bilan.essais} réussis (${taux} %), faux succès : ${bilan.fauxSucces}, ` +
-        `limites : ${bilan.limitesOk}/${bilan.limitesTotal}, mises en place ratées : ${bilan.setupRates} -> ${valide ? 'VALIDÉ' : 'NON VALIDÉ'}`
+        `--- ${skill}: ${report.succeeded}/${report.trials} succeeded (${rate} %), false successes: ${report.falseSuccesses}, ` +
+        `edge cases: ${report.edgeOk}/${report.edgeTotal}, setup failures: ${report.setupFailures} -> ${passed ? 'PASSED' : 'NOT PASSED'}`
     )
-    return { ...bilan, taux, valide }
+    return { ...report, rate, passed }
 }
 
-async function run(bot, nom, n) {
-    const noms = nom === 'all' ? SUITES : [nom]
-    if (!noms.every((s) => SUITES.includes(s))) {
-        console.log(`Suite inconnue : ${nom}. Choix : ${SUITES.join(', ')}, all`)
+async function run(bot, name, n) {
+    const names = name === 'all' ? SUITES : [name]
+    if (!names.every((s) => SUITES.includes(s))) {
+        console.log(`Unknown suite: ${name}. Choices: ${SUITES.join(', ')}, all`)
         return
     }
-    const essais = parseInt(n || '10', 10)
+    const trials = parseInt(n || '10', 10)
 
-    await preparer(bot)
-    const bilans = []
-    for (const s of noms) bilans.push(await lancerSuite(bot, s, essais))
+    await prepareArena(bot)
+    const reports = []
+    for (const s of names) reports.push(await runSuite(bot, s, trials))
 
-    if (bilans.length > 1) {
-        console.log('\n=== Résumé ===')
-        for (const b of bilans) console.log(`  ${b.skill} : ${b.taux} % ${b.valide ? 'VALIDÉ' : 'NON VALIDÉ'}`)
+    if (reports.length > 1) {
+        console.log('\n=== Summary ===')
+        for (const r of reports) console.log(`  ${r.skill}: ${r.rate} % ${r.passed ? 'PASSED' : 'NOT PASSED'}`)
     }
 }
 

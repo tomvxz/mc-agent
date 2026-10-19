@@ -7,8 +7,8 @@ branché sur le VRAI jeu via Mineflayer. Projet d'apprentissage : l'utilisateur 
 - `server/` : serveur Paper 1.21.11 local (online-mode=false). Le bot est op.
 - `bot/` : Node.js, Mineflayer + mineflayer-pathfinder, CommonJS (`require`, pas d'ESM).
   - `bot.js` : crée le bot, lance les tests (`node --env-file=../.env bot.js testN`, ou `suite <compétence|all> [N]`)
-  - `src/skills/` : une compétence par fichier, regroupées dans `index.js` (`outils.js` = fonctions partagées)
-  - `src/movements.js` : réglages du pathfinder (déplacements débrouillards + instincts), `src/correctifs.js` : correctifs de bugs Mineflayer
+  - `src/skills/` : une compétence par fichier, regroupées dans `index.js` (`utils.js` = fonctions partagées)
+  - `src/movements.js` : réglages du pathfinder (déplacements débrouillards + instincts), `src/fixes.js` : correctifs de bugs Mineflayer
   - `tests/unit/` (`npm test`, faux bot, sans serveur) et `tests/game/` (arène reproductible, taux de réussite)
   - `src/runSkill.js` : enveloppe (timeout, capture d'erreurs, durée)
   - `src/state.js` : `observe(bot)` renvoie l'état structuré (pas de pixels)
@@ -100,8 +100,10 @@ Après l'étape 8 seulement : macros enregistrées par le LLM, planificateur sur
 
 ## Manière de travailler avec l'utilisateur
 - Petites étapes, une à la fois, chacune avec un critère de réussite vérifiable.
-- Expliquer simplement le JavaScript (commentaires en français, pas de jargon inutile).
+- Expliquer simplement le JavaScript (commentaires clairs, pas de jargon inutile).
 - Côté Python, décrire d'abord ce qui sera implémenté ; l'utilisateur décide ce que Claude écrit et ce qu'il écrit lui-même.
 - Ne pas sur-construire : pas de framework, pas d'abstractions prématurées.
 - Annoncer ce qui a été testé et ce qui ne l'a pas été (le jeu réel n'est pas simulable ici).
+- Le code est en ANGLAIS : noms de fichiers, variables, fonctions, commentaires, messages de log et d'erreur,
+  noms des tests, descriptions du catalogue (lues par le LLM). Seuls CLAUDE.md et la conversation restent en français.
 

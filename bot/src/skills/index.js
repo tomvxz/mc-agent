@@ -1,16 +1,16 @@
-// Le catalogue des compétences. Les NOMS sont stables : ce sont des entrées du world model.
+// The skill catalogue. NAMES are stable: they are inputs of the world model.
 module.exports = {
-    // Primitives (agissent sur le monde)
+    // Primitives (act on the world)
     move_to: require('./move_to'),
     break_block: require('./break_block'),
     place_block: require('./place_block'),
     craft: require('./craft'),
     eat: require('./eat'),
-    // Questions (ne changent rien au monde)
+    // Questions (change nothing in the world)
     find: require('./find'),
     scan: require('./scan'),
-    // Déplacement pour découvrir
+    // Moving to discover new places
     explore: require('./explore'),
-    // Raccourcis (assemblages de primitives)
+    // Shortcuts (assemblies of primitives)
     mine: require('./mine'),
 }

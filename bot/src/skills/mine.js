@@ -1,49 +1,49 @@
-// Raccourci : miner `count` blocs d'un type = find + break_block, répété.
-// Ce n'est qu'un assemblage de primitives (voir CLAUDE.md, "Philosophie des compétences").
+// Shortcut: mine `count` blocks of a type = find + break_block, repeated.
+// It is only an assembly of primitives (see CLAUDE.md, skill philosophy).
 const find = require('./find')
 const break_block = require('./break_block')
-const { inventaire, gagne } = require('./outils')
+const { inventoryCounts, gainedSince } = require('./utils')
 
-// Échecs qui ne concernent que CE bloc-là : on essaie le suivant
-const ESSAYER_UN_AUTRE = ['no_path', 'path_timeout', 'interrupted', 'nothing_to_break']
-const MAX_ESSAIS = 20
+// Failures that only concern THIS block: try the next one
+const TRY_ANOTHER = ['no_path', 'path_timeout', 'interrupted', 'nothing_to_break']
+const MAX_ATTEMPTS = 20
 
 async function mine(bot, { block, count = 1 } = {}) {
-    // 1. Vérifier les arguments
+    // 1. Check the arguments
     if (!bot.registry.blocksByName[block]) return { success: false, reason: 'unknown_block', details: {} }
     if (!Number.isInteger(count) || count < 1) return { success: false, reason: 'invalid_args', details: { count } }
 
-    const avant = inventaire(bot)
-    const total = () => Object.values(gagne(bot, avant)).reduce((a, b) => a + b, 0)
-    const essayes = new Set() // positions déjà tentées, pour ne pas viser deux fois le même bloc
+    const before = inventoryCounts(bot)
+    const total = () => Object.values(gainedSince(bot, before)).reduce((a, b) => a + b, 0)
+    const tried = new Set() // positions already attempted, so the same block is never targeted twice
     let dug = 0
-    let inaccessibles = 0
+    let unreachable = 0
 
     while (dug < count) {
-        // 2. Le bloc non encore tenté le plus proche
-        const trouve = await find(bot, { target: block, count: 50, max_distance: 32 })
-        const cible = trouve.success && trouve.details.matches.find((m) => !essayes.has(`${m.x},${m.y},${m.z}`))
-        if (!cible || essayes.size >= MAX_ESSAIS) {
-            const reason = dug > 0 ? 'partial' : inaccessibles > 0 ? 'no_path' : 'block_not_found'
-            return { success: false, reason, details: { dug, collected: gagne(bot, avant), unreachable: inaccessibles } }
+        // 2. The nearest block not tried yet
+        const found = await find(bot, { target: block, count: 50, max_distance: 32 })
+        const target = found.success && found.details.matches.find((m) => !tried.has(`${m.x},${m.y},${m.z}`))
+        if (!target || tried.size >= MAX_ATTEMPTS) {
+            const reason = dug > 0 ? 'partial' : unreachable > 0 ? 'no_path' : 'block_not_found'
+            return { success: false, reason, details: { dug, collected: gainedSince(bot, before), unreachable } }
         }
-        essayes.add(`${cible.x},${cible.y},${cible.z}`)
+        tried.add(`${target.x},${target.y},${target.z}`)
 
-        // 3. Le casser (break_block s'approche et ramasse)
-        const r = await break_block(bot, { x: cible.x, y: cible.y, z: cible.z })
+        // 3. Break it (break_block walks there and picks up the drop)
+        const r = await break_block(bot, { x: target.x, y: target.y, z: target.z })
         if (r.success) {
             dug++
-        } else if (ESSAYER_UN_AUTRE.includes(r.reason)) {
-            inaccessibles++
+        } else if (TRY_ANOTHER.includes(r.reason)) {
+            unreachable++
         } else {
-            // no_tool, unbreakable, dig_failed... : le suivant échouerait pareil
-            return { success: false, reason: r.reason, details: { dug, collected: gagne(bot, avant), ...r.details } }
+            // no_tool, unbreakable, dig_failed...: the next block would fail the same way
+            return { success: false, reason: r.reason, details: { dug, collected: gainedSince(bot, before), ...r.details } }
         }
     }
 
-    // 4. Casser ne suffit pas : il faut avoir récupéré quelque chose par bloc
-    if (total() < dug) return { success: false, reason: 'not_collected', details: { dug, collected: gagne(bot, avant) } }
-    return { success: true, reason: 'ok', details: { dug, collected: gagne(bot, avant), unreachable: inaccessibles } }
+    // 4. Breaking is not enough: something must have been collected per block
+    if (total() < dug) return { success: false, reason: 'not_collected', details: { dug, collected: gainedSince(bot, before) } }
+    return { success: true, reason: 'ok', details: { dug, collected: gainedSince(bot, before), unreachable } }
 }
 
 module.exports = mine

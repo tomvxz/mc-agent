@@ -1,36 +1,36 @@
-const { poser, donner: donnerObjet, CENTRE: C } = require('./arena')
+const { placeAndWait, giveAndWait, CENTER: C } = require('./arena')
 
-// Donne une liste d'objets : { oak_log: 3 }
-const donner = (objets) => async (bot) => {
-    for (const [nom, n] of Object.entries(objets)) await donnerObjet(bot, nom, n)
+// Give a list of items: { oak_log: 3 }
+const give = (items) => async (bot) => {
+    for (const [name, n] of Object.entries(items)) await giveAndWait(bot, name, n)
 }
 
-// Vérifie dans l'inventaire réel qu'on a gagné au moins n objets
-const gagne = (nom, n) => (r, avant, apres) => {
-    const delta = (apres.inventory[nom] || 0) - (avant.inventory[nom] || 0)
-    return delta >= n || `${nom} +${delta}`
+// Check in the real inventory that at least n items were gained
+const gained = (name, n) => (r, before, after) => {
+    const delta = (after.inventory[name] || 0) - (before.inventory[name] || 0)
+    return delta >= n || `${name} +${delta}`
 }
 
-const nominaux = [
-    { nom: 'planches (2x2)', setup: donner({ oak_log: 1 }), args: { item: 'oak_planks', count: 4 }, verify: gagne('oak_planks', 4) },
-    { nom: 'bâtons (2x2)', setup: donner({ oak_planks: 2 }), args: { item: 'stick', count: 4 }, verify: gagne('stick', 4) },
-    { nom: 'table (2x2)', setup: donner({ oak_planks: 4 }), args: { item: 'crafting_table' }, verify: gagne('crafting_table', 1) },
+const nominal = [
+    { name: 'planks (2x2)', setup: give({ oak_log: 1 }), args: { item: 'oak_planks', count: 4 }, verify: gained('oak_planks', 4) },
+    { name: 'sticks (2x2)', setup: give({ oak_planks: 2 }), args: { item: 'stick', count: 4 }, verify: gained('stick', 4) },
+    { name: 'table (2x2)', setup: give({ oak_planks: 4 }), args: { item: 'crafting_table' }, verify: gained('crafting_table', 1) },
     {
-        nom: 'pioche en bois (3x3, table à 6 blocs)',
+        name: 'wooden pickaxe (3x3, table 6 blocks away)',
         setup: async (bot) => {
-            await donner({ oak_planks: 3, stick: 2 })(bot)
-            await poser(bot, `/setblock ${C.x + 6} ${C.y} ${C.z + 2} crafting_table`, [C.x + 6, C.y, C.z + 2], 'crafting_table')
+            await give({ oak_planks: 3, stick: 2 })(bot)
+            await placeAndWait(bot, `/setblock ${C.x + 6} ${C.y} ${C.z + 2} crafting_table`, [C.x + 6, C.y, C.z + 2], 'crafting_table')
         },
         args: { item: 'wooden_pickaxe' },
-        verify: gagne('wooden_pickaxe', 1),
+        verify: gained('wooden_pickaxe', 1),
     },
 ]
 
-const limites = [
-    { nom: 'ingrédients manquants', args: { item: 'stick' }, expect: 'missing_ingredients' },
-    { nom: 'pas de table autour', setup: donner({ oak_planks: 3, stick: 2 }), args: { item: 'wooden_pickaxe' }, expect: 'no_crafting_table' },
-    { nom: 'objet sans recette', args: { item: 'dirt' }, expect: 'no_recipe' },
-    { nom: 'objet inconnu', args: { item: 'truc' }, expect: 'unknown_item' },
+const edgeCases = [
+    { name: 'missing ingredients', args: { item: 'stick' }, expect: 'missing_ingredients' },
+    { name: 'no table around', setup: give({ oak_planks: 3, stick: 2 }), args: { item: 'wooden_pickaxe' }, expect: 'no_crafting_table' },
+    { name: 'item without a recipe', args: { item: 'dirt' }, expect: 'no_recipe' },
+    { name: 'unknown item', args: { item: 'no_such_item' }, expect: 'unknown_item' },
 ]
 
-module.exports = { skill: 'craft', nominaux, limites }
+module.exports = { skill: 'craft', nominal, edgeCases }

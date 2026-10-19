@@ -1,62 +1,62 @@
 const { goals } = require('mineflayer-pathfinder')
-const { raisonDeplacement, vecteur } = require('./outils')
+const { movementFailureReason, makeVec3 } = require('./utils')
 
-const VIDE = ['air', 'cave_air', 'void_air']
-// Les 6 voisins d'un bloc : dessous, dessus, et les 4 côtés
-const VOISINS = [[0, -1, 0], [0, 1, 0], [1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1]]
+const EMPTY = ['air', 'cave_air', 'void_air']
+// The 6 neighbours of a block: below, above, and the 4 sides
+const NEIGHBOURS = [[0, -1, 0], [0, 1, 0], [1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1]]
 
-// Poser un bloc de l'inventaire à une position (le bot s'approche tout seul)
+// Place a block from the inventory at a position (the bot walks there on its own)
 async function place_block(bot, { item, x, y, z } = {}) {
-    // 1. Vérifier les arguments
+    // 1. Check the arguments
     if (typeof item !== 'string' || ![x, y, z].every(Number.isInteger)) {
         return { success: false, reason: 'invalid_args', details: { item, x, y, z } }
     }
     if (!bot.registry.blocksByName[item]) return { success: false, reason: 'unknown_block', details: { item } }
 
-    const objet = bot.inventory.items().find((i) => i.name === item)
-    if (!objet) return { success: false, reason: 'not_in_inventory', details: { item } }
+    const stack = bot.inventory.items().find((i) => i.name === item)
+    if (!stack) return { success: false, reason: 'not_in_inventory', details: { item } }
 
-    // 2. La case visée doit être vide
+    // 2. The target cell must be empty
     const position = [x, y, z]
-    const cible = vecteur(bot, x, y, z)
-    const actuel = bot.blockAt(cible)
-    if (!actuel) return { success: false, reason: 'not_loaded', details: { position } }
-    if (!VIDE.includes(actuel.name)) {
-        return { success: false, reason: 'occupied', details: { position, current: actuel.name } }
+    const target = makeVec3(bot, x, y, z)
+    const current = bot.blockAt(target)
+    if (!current) return { success: false, reason: 'not_loaded', details: { position } }
+    if (!EMPTY.includes(current.name)) {
+        return { success: false, reason: 'occupied', details: { position, current: current.name } }
     }
 
-    // 3. Il faut un bloc plein à côté, sur lequel "coller" le nouveau bloc
-    let appui = null
+    // 3. A solid block next to it is needed to "stick" the new block onto
+    let support = null
     let face = null
-    for (const [dx, dy, dz] of VOISINS) {
-        const voisin = bot.blockAt(cible.offset(dx, dy, dz))
-        if (voisin && voisin.boundingBox === 'block') {
-            appui = voisin
-            face = vecteur(bot, -dx, -dy, -dz) // direction de l'appui vers la cible
+    for (const [dx, dy, dz] of NEIGHBOURS) {
+        const neighbour = bot.blockAt(target.offset(dx, dy, dz))
+        if (neighbour && neighbour.boundingBox === 'block') {
+            support = neighbour
+            face = makeVec3(bot, -dx, -dy, -dz) // direction from the support to the target
             break
         }
     }
-    if (!appui) return { success: false, reason: 'no_support', details: { position } }
+    if (!support) return { success: false, reason: 'no_support', details: { position } }
 
     try {
-        // 4. Se placer à portée, sans se tenir dans la case visée
-        await bot.pathfinder.goto(new goals.GoalPlaceBlock(cible, bot.world, { range: 4 }))
+        // 4. Get within reach, without standing in the target cell
+        await bot.pathfinder.goto(new goals.GoalPlaceBlock(target, bot.world, { range: 4 }))
     } catch (e) {
-        return { success: false, reason: raisonDeplacement(e), details: { position, error: e.message } }
+        return { success: false, reason: movementFailureReason(e), details: { position, error: e.message } }
     }
 
     try {
-        // 5. Prendre le bloc en main et le poser
-        await bot.equip(objet, 'hand')
-        await bot.placeBlock(appui, face)
+        // 5. Hold the block and place it
+        await bot.equip(stack, 'hand')
+        await bot.placeBlock(support, face)
     } catch (e) {
         return { success: false, reason: 'place_failed', details: { position, error: e.message } }
     }
 
-    // 6. Vérifier que le bloc est bien là
-    const pose = bot.blockAt(cible)
-    if (!pose || pose.name !== item) {
-        return { success: false, reason: 'place_failed', details: { position, current: pose && pose.name } }
+    // 6. Check that the block is really there
+    const placed = bot.blockAt(target)
+    if (!placed || placed.name !== item) {
+        return { success: false, reason: 'place_failed', details: { position, current: placed && placed.name } }
     }
     return { success: true, reason: 'ok', details: { position } }
 }

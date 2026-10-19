@@ -1,102 +1,102 @@
-// Une arène identique à chaque test, construite avec des commandes op envoyées par le bot.
-// - Murs, plafond et dessous en barrière : incassables et transparents (le pathfinder
-//   creuse par défaut, il ne doit pas pouvoir sortir).
-// - En hauteur (y=200), loin du terrain naturel : findBlock (32 blocs) ne voit rien d'autre.
-// - Le bot se tient sur le sol en pierre, en y=202, au centre (1000, 1000).
+// An identical arena for every test, built with op commands sent by the bot.
+// - Walls, ceiling and underside made of barrier: unbreakable and transparent (the pathfinder
+//   digs by default, it must not be able to get out).
+// - High up (y=200), far from natural terrain: findBlock (32 blocks) sees nothing else.
+// - The bot stands on the stone floor, at y=202, in the center (1000, 1000).
 
-const { attendre, attendreQue } = require('../../src/skills/outils')
+const { sleep, waitUntil } = require('../../src/skills/utils')
 
 const MIN = { x: 977, y: 200, z: 977 }
 const MAX = { x: 1023, y: 213, z: 1023 }
-const SOL = 201
-const CENTRE = { x: 1000, y: SOL + 1, z: 1000 }
+const FLOOR_Y = 201
+const CENTER = { x: 1000, y: FLOOR_Y + 1, z: 1000 }
 
-// Envoie une commande et renvoie la réponse du serveur (ou null après maxMs)
-function cmd(bot, texte, maxMs = 1000) {
+// Send a command and return the server's answer (or null after maxMs)
+function runCommand(bot, text, maxMs = 1000) {
     return new Promise((resolve) => {
-        const fin = (msg) => {
-            clearTimeout(minuteur)
-            bot.removeListener('messagestr', surMessage)
+        const finish = (msg) => {
+            clearTimeout(timer)
+            bot.removeListener('messagestr', onMessage)
             resolve(msg)
         }
-        const surMessage = (msg, position) => {
-            if (position !== 'chat') fin(msg) // les réponses aux commandes sont des messages "system"
+        const onMessage = (msg, position) => {
+            if (position !== 'chat') finish(msg) // command answers are "system" messages
         }
-        const minuteur = setTimeout(() => fin(null), maxMs)
-        bot.on('messagestr', surMessage)
-        bot.chat(texte)
+        const timer = setTimeout(() => finish(null), maxMs)
+        bot.on('messagestr', onMessage)
+        bot.chat(text)
     })
 }
 
-// /fill échoue si les chunks ne sont pas encore générés : on réessaie
-async function remplir(bot, texte) {
-    for (let essai = 1; essai <= 10; essai++) {
-        const reponse = await cmd(bot, texte, 3000)
-        if (reponse && !/not loaded|unloaded/i.test(reponse)) return reponse
-        await attendre(1000)
+// /fill fails while the chunks are not generated yet: retry
+async function fillWithRetry(bot, text) {
+    for (let attempt = 1; attempt <= 10; attempt++) {
+        const answer = await runCommand(bot, text, 3000)
+        if (answer && !/not loaded|unloaded/i.test(answer)) return answer
+        await sleep(1000)
     }
-    throw new Error(`commande impossible : ${texte}`)
+    throw new Error(`command failed: ${text}`)
 }
 
-const zone = `${MIN.x} ${MIN.y} ${MIN.z} ${MAX.x} ${MAX.y} ${MAX.z}`
-const interieur = `${MIN.x + 1} ${SOL + 1} ${MIN.z + 1} ${MAX.x - 1} ${MAX.y - 1} ${MAX.z - 1}`
-const sol = `${MIN.x + 1} ${SOL} ${MIN.z + 1} ${MAX.x - 1} ${SOL} ${MAX.z - 1}`
+const area = `${MIN.x} ${MIN.y} ${MIN.z} ${MAX.x} ${MAX.y} ${MAX.z}`
+const interior = `${MIN.x + 1} ${FLOOR_Y + 1} ${MIN.z + 1} ${MAX.x - 1} ${MAX.y - 1} ${MAX.z - 1}`
+const floor = `${MIN.x + 1} ${FLOOR_Y} ${MIN.z + 1} ${MAX.x - 1} ${FLOOR_Y} ${MAX.z - 1}`
 
-// Pose des blocs avec une commande (/fill, /setblock), puis attend que le BOT les voie.
-// Le serveur répond "Successfully filled" avant d'envoyer les blocs au bot : sans cette
-// attente, la compétence démarre dans un monde où les blocs ne sont pas encore là.
-async function poser(bot, commande, [x, y, z], nom) {
-    await cmd(bot, commande)
-    const vu = await attendreQue(() => {
+// Place blocks with a command (/fill, /setblock), then wait until the BOT sees them.
+// The server answers "Successfully filled" before sending the blocks to the bot: without this
+// wait, the skill starts in a world where the blocks are not there yet.
+async function placeAndWait(bot, command, [x, y, z], name) {
+    await runCommand(bot, command)
+    const seen = await waitUntil(() => {
         const b = bot.blockAt(bot.entity.position.clone().set(x, y, z))
-        return b && b.name === nom
+        return b && b.name === name
     }, 3000)
-    if (!vu) throw new Error(`le bot ne voit pas ${nom} en ${x},${y},${z}`) // mise en place ratée
+    if (!seen) throw new Error(`the bot does not see ${name} at ${x},${y},${z}`) // setup failed
 }
 
-// Donne des objets au bot (/give), puis attend qu'ils soient vraiment dans son inventaire
-async function donner(bot, nom, n) {
-    const compte = () => bot.inventory.items().filter((i) => i.name === nom).reduce((t, i) => t + i.count, 0)
-    const avant = compte()
-    await cmd(bot, `/give ${bot.username} ${nom} ${n}`)
-    if (!(await attendreQue(() => compte() >= avant + n, 3000))) {
-        throw new Error(`le bot n'a pas reçu ${n} ${nom}`) // mise en place ratée
+// Give items to the bot (/give), then wait until they are really in its inventory
+async function giveAndWait(bot, name, n) {
+    const count = () => bot.inventory.items().filter((i) => i.name === name).reduce((t, i) => t + i.count, 0)
+    const before = count()
+    await runCommand(bot, `/give ${bot.username} ${name} ${n}`)
+    if (!(await waitUntil(() => count() >= before + n, 3000))) {
+        throw new Error(`the bot did not receive ${n} ${name}`) // setup failed
     }
 }
 
-// À faire une fois au début d'une suite
-async function preparer(bot) {
+// Run once at the start of a suite
+async function prepareArena(bot) {
     const u = bot.username
-    console.log('[arène] préparation...')
-    await cmd(bot, `/gamemode survival ${u}`)
-    await cmd(bot, `/forceload add ${MIN.x} ${MIN.z} ${MAX.x} ${MAX.z}`, 5000)
-    await remplir(bot, `/fill ${zone} barrier hollow`)
-    await cmd(bot, '/weather clear')
-    await reinitialiser(bot)
-    console.log('[arène] prête')
+    console.log('[arena] preparing...')
+    await runCommand(bot, `/gamemode survival ${u}`)
+    await runCommand(bot, `/forceload add ${MIN.x} ${MIN.z} ${MAX.x} ${MAX.z}`, 5000)
+    await fillWithRetry(bot, `/fill ${area} barrier hollow`)
+    await runCommand(bot, '/weather clear')
+    await resetArena(bot)
+    console.log('[arena] ready')
 }
 
-// À faire avant chaque essai : arène vide, inventaire vide, santé et faim pleines, au centre
-async function reinitialiser(bot) {
+// Run before every trial: empty arena, empty inventory, full health and hunger, at the center
+async function resetArena(bot) {
     const u = bot.username
     bot.pathfinder.setGoal(null)
-    await cmd(bot, `/kill @e[type=!player,x=${MIN.x},y=${MIN.y},z=${MIN.z},dx=46,dy=13,dz=46]`)
-    // Les entités tuées restent un instant dans bot.entities (animation de mort) : on attend qu'elles partent
-    await attendreQue(() => !Object.values(bot.entities).some((e) => e !== bot.entity && e.type !== 'player' &&
-        e.position && e.position.y >= MIN.y && Math.abs(e.position.x - CENTRE.x) < 25 && Math.abs(e.position.z - CENTRE.z) < 25), 3000)
-    await remplir(bot, `/fill ${interieur} air`)
-    await remplir(bot, `/fill ${sol} stone`) // certains tests creusent ou mettent de la lave dans le sol
-    await cmd(bot, `/clear ${u}`)
-    await cmd(bot, `/effect clear ${u}`)
-    await cmd(bot, `/effect give ${u} saturation 1 255 true`) // faim pleine
-    await cmd(bot, `/effect give ${u} instant_health 1 5 true`) // santé pleine
-    await cmd(bot, '/time set day')
-    await cmd(bot, `/tp ${u} ${CENTRE.x + 0.5} ${CENTRE.y} ${CENTRE.z + 0.5}`)
+    await runCommand(bot, `/kill @e[type=!player,x=${MIN.x},y=${MIN.y},z=${MIN.z},dx=46,dy=13,dz=46]`)
+    // Killed entities stay a moment in bot.entities (death animation): wait for them to go
+    await waitUntil(() => !Object.values(bot.entities).some((e) => e !== bot.entity && e.type !== 'player' &&
+        e.position && e.position.y >= MIN.y && Math.abs(e.position.x - CENTER.x) < 25 && Math.abs(e.position.z - CENTER.z) < 25), 3000)
+    await fillWithRetry(bot, `/fill ${interior} air`)
+    await fillWithRetry(bot, `/fill ${floor} stone`) // some tests dig into the floor or put lava in it
+    await runCommand(bot, `/clear ${u}`)
+    await runCommand(bot, `/effect clear ${u}`)
+    await runCommand(bot, `/effect give ${u} saturation 1 255 true`) // full hunger
+    await runCommand(bot, `/effect give ${u} instant_health 1 5 true`) // full health
+    await runCommand(bot, '/time set day')
+    await runCommand(bot, `/tp ${u} ${CENTER.x + 0.5} ${CENTER.y} ${CENTER.z + 0.5}`)
     await bot.waitForChunksToLoad()
-    // Attendre que le bot soit vraiment posé au centre
-    await attendreQue(() => bot.entity.position.distanceTo(bot.entity.position.clone().set(CENTRE.x + 0.5, CENTRE.y, CENTRE.z + 0.5)) < 0.5 && bot.entity.onGround, 5000)
-    await attendreQue(() => bot.food === 20, 3000)
-    await attendre(300)
+    // Wait until the bot really stands at the center
+    await waitUntil(() => bot.entity.position.distanceTo(bot.entity.position.clone().set(CENTER.x + 0.5, CENTER.y, CENTER.z + 0.5)) < 0.5 && bot.entity.onGround, 5000)
+    await waitUntil(() => bot.food === 20, 3000)
+    await sleep(300)
 }
 
-module.exports = { cmd, poser, donner, preparer, reinitialiser, CENTRE, SOL, MIN, MAX }
+module.exports = { runCommand, placeAndWait, giveAndWait, prepareArena, resetArena, CENTER, FLOOR_Y, MIN, MAX }

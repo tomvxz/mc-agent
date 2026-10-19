@@ -1,10 +1,10 @@
-// Un faux bot, juste assez réaliste pour tester les compétences sans Minecraft.
-// On ne simule pas le jeu : seulement ce que les compétences lisent avant d'agir.
+// A fake bot, just realistic enough to test skills without Minecraft.
+// We do not simulate the game: only what the skills read before acting.
 
 const { EventEmitter } = require('events')
 const registry = require('minecraft-data')('1.21.11')
 
-// Un point 3D minimal, qui imite le Vec3 de Mineflayer
+// A minimal 3D point that mimics Mineflayer's Vec3
 class Point {
     constructor(x, y, z) {
         this.x = x
@@ -20,12 +20,12 @@ class Point {
     plus(p) { return new Point(this.x + p.x, this.y + p.y, this.z + p.z) }
 }
 
-// options : { inventory: { bread: 2 }, food: 20, blocks: { '0,0,0': 'stone' }, entities: [...] }
+// options: { inventory: { bread: 2 }, food: 20, blocks: { '0,0,0': 'stone' }, entities: [...] }
 function fakeBot(options = {}) {
-    const inventaire = Object.entries(options.inventory || {}).map(([name, count]) => ({ name, count, type: registry.itemsByName[name].id }))
-    const blocs = options.blocks || {}
+    const inventory = Object.entries(options.inventory || {}).map(([name, count]) => ({ name, count, type: registry.itemsByName[name].id }))
+    const blocks = options.blocks || {}
 
-    // Object.assign sur un EventEmitter : le faux bot sait faire bot.on(...) comme le vrai
+    // Object.assign onto an EventEmitter: the fake bot supports bot.on(...) like the real one
     return Object.assign(new EventEmitter(), {
         registry,
         username: 'Agent',
@@ -35,12 +35,12 @@ function fakeBot(options = {}) {
         entity: { position: new Point(0.5, 100, 0.5) },
         entities: options.entities || {},
         inventory: {
-            items: () => inventaire,
-            count: (id) => inventaire.filter((i) => registry.itemsByName[i.name].id === id).reduce((n, i) => n + i.count, 0),
+            items: () => inventory,
+            count: (id) => inventory.filter((i) => registry.itemsByName[i.name].id === id).reduce((n, i) => n + i.count, 0),
         },
-        // Les blocs non précisés sont de l'air ; les autres prennent leurs propriétés du vrai registre
+        // Unspecified blocks are air; the others take their properties from the real registry
         blockAt: (p) => {
-            const name = blocs[`${p.x},${p.y},${p.z}`] || 'air'
+            const name = blocks[`${p.x},${p.y},${p.z}`] || 'air'
             const info = registry.blocksByName[name]
             return {
                 name, type: info.id, position: p, diggable: info.diggable, harvestTools: info.harvestTools,
@@ -48,14 +48,14 @@ function fakeBot(options = {}) {
             }
         },
         findBlock: () => null,
-        // Cherche vraiment dans `blocks` (matching = un id ou une liste d'ids)
+        // Really searches `blocks` (matching = one id or a list of ids)
         findBlocks: ({ matching, maxDistance }) => {
             const ids = [].concat(matching)
-            const centre = new Point(0.5, 100, 0.5)
-            return Object.entries(blocs)
+            const center = new Point(0.5, 100, 0.5)
+            return Object.entries(blocks)
                 .filter(([, name]) => ids.includes(registry.blocksByName[name].id))
-                .map(([cle]) => new Point(...cle.split(',').map(Number)))
-                .filter((p) => p.distanceTo(centre) <= maxDistance)
+                .map(([key]) => new Point(...key.split(',').map(Number)))
+                .filter((p) => p.distanceTo(center) <= maxDistance)
         },
         canDigBlock: () => true,
         canSeeBlock: () => true,
@@ -67,10 +67,10 @@ function fakeBot(options = {}) {
             bestHarvestTool: () => null,
         },
         stopDigging: () => {},
-        // Une action du jeu appelée par erreur doit faire échouer le test
-        equip: async () => { throw new Error('equip ne devrait pas être appelé') },
-        consume: async () => { throw new Error('consume ne devrait pas être appelé') },
-        dig: async () => { throw new Error('dig ne devrait pas être appelé') },
+        // A game action called by mistake must make the test fail
+        equip: async () => { throw new Error('equip should not be called') },
+        consume: async () => { throw new Error('consume should not be called') },
+        dig: async () => { throw new Error('dig should not be called') },
     })
 }
 

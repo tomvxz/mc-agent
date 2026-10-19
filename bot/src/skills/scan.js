@@ -1,11 +1,11 @@
-const { arrondi } = require('./outils')
+const { round1 } = require('./utils')
 
-// Blocs utiles à signaler au LLM (en plus de toutes les bûches et de tous les minerais)
-const UTILES = ['water', 'lava', 'crafting_table', 'furnace', 'chest', 'sand', 'gravel', 'clay']
-const MAX_BLOCS = 2000 // au-delà, le comptage est tronqué (signalé par truncated)
+// Useful blocks to report to the LLM (on top of every log and every ore)
+const USEFUL = ['water', 'lava', 'crafting_table', 'furnace', 'chest', 'sand', 'gravel', 'clay']
+const MAX_BLOCKS = 2000 // beyond this the count is truncated (reported by truncated)
 
-// Question (ne change rien au monde) : résumé de ce qu'il y a autour du bot.
-// Plus large que observe() : observe sert au world model et doit rester simple.
+// Question (changes nothing in the world): summary of what is around the bot.
+// Broader than observe(): observe feeds the world model and must stay simple.
 async function scan(bot, { radius = 16 } = {}) {
     if (!Number.isFinite(radius) || radius <= 0 || radius > 32) {
         return { success: false, reason: 'invalid_args', details: { radius } }
@@ -13,35 +13,35 @@ async function scan(bot, { radius = 16 } = {}) {
     const pos = bot.entity.position
     const r = bot.registry
 
-    // 1. Les blocs : bûches, minerais et la liste UTILES
-    const noms = Object.keys(r.blocksByName).filter((n) => n.endsWith('_log') || n.endsWith('_ore') || UTILES.includes(n))
-    const positions = bot.findBlocks({ matching: noms.map((n) => r.blocksByName[n].id), maxDistance: radius, count: MAX_BLOCS })
+    // 1. Blocks: logs, ores and the USEFUL list
+    const names = Object.keys(r.blocksByName).filter((n) => n.endsWith('_log') || n.endsWith('_ore') || USEFUL.includes(n))
+    const positions = bot.findBlocks({ matching: names.map((n) => r.blocksByName[n].id), maxDistance: radius, count: MAX_BLOCKS })
     const blocks = {}
     for (const p of positions) {
-        const nom = bot.blockAt(p).name
+        const name = bot.blockAt(p).name
         const d = p.distanceTo(pos)
-        const b = blocks[nom] || (blocks[nom] = { count: 0, nearest: null, d: Infinity })
+        const b = blocks[name] || (blocks[name] = { count: 0, nearest: null, d: Infinity })
         b.count++
         if (d < b.d) { b.d = d; b.nearest = [p.x, p.y, p.z] }
     }
-    for (const b of Object.values(blocks)) delete b.d // la distance ne servait qu'au calcul
+    for (const b of Object.values(blocks)) delete b.d // the distance was only needed for the computation
 
-    // 2. Les entités (animaux, monstres, joueurs, objets au sol), sauf le bot lui-même
+    // 2. Entities (animals, monsters, players, items on the ground), except the bot itself
     const entities = {}
     for (const e of Object.values(bot.entities)) {
         if (e === bot.entity || !e.position) continue
         const d = e.position.distanceTo(pos)
         if (d > radius) continue
-        const nom = e.name || e.type
-        const s = entities[nom] || (entities[nom] = { count: 0, nearest: null, distance: Infinity })
+        const name = e.name || e.type
+        const s = entities[name] || (entities[name] = { count: 0, nearest: null, distance: Infinity })
         s.count++
         if (d < s.distance) {
-            s.distance = arrondi(d)
-            s.nearest = [e.position.x, e.position.y, e.position.z].map(arrondi)
+            s.distance = round1(d)
+            s.nearest = [e.position.x, e.position.y, e.position.z].map(round1)
         }
     }
 
-    return { success: true, reason: 'ok', details: { radius, blocks, entities, truncated: positions.length >= MAX_BLOCS } }
+    return { success: true, reason: 'ok', details: { radius, blocks, entities, truncated: positions.length >= MAX_BLOCKS } }
 }
 
 module.exports = scan

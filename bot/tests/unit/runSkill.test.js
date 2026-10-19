@@ -3,28 +3,28 @@ const assert = require('node:assert')
 const runSkill = require('../../src/runSkill')
 const { fakeBot } = require('./fakeBot')
 
-test('une compétence qui réussit garde son résultat et reçoit une durée', async () => {
+test('a successful skill keeps its result and gets a duration', async () => {
     const r = await runSkill(fakeBot(), async () => ({ success: true, reason: 'ok', details: {} }), {})
     assert.strictEqual(r.success, true)
     assert.strictEqual(r.reason, 'ok')
     assert.strictEqual(typeof r.duration, 'number')
 })
 
-test('une compétence trop longue renvoie timeout et arrête le pathfinder', async () => {
+test('a skill that takes too long returns timeout and stops the pathfinder', async () => {
     const bot = fakeBot()
-    let arret = false
-    bot.pathfinder.setGoal = (goal) => { if (goal === null) arret = true }
+    let stopped = false
+    bot.pathfinder.setGoal = (goal) => { if (goal === null) stopped = true }
     const r = await runSkill(bot, () => new Promise(() => {}), {}, 100)
     assert.strictEqual(r.reason, 'timeout')
-    assert.strictEqual(arret, true)
+    assert.strictEqual(stopped, true)
 })
 
-test('une exception devient un échec "exception"', async () => {
-    const r = await runSkill(fakeBot(), async () => { throw new Error('boum') }, {})
-    assert.deepStrictEqual([r.success, r.reason, r.details.error], [false, 'exception', 'boum'])
+test('an exception becomes an "exception" failure', async () => {
+    const r = await runSkill(fakeBot(), async () => { throw new Error('boom') }, {})
+    assert.deepStrictEqual([r.success, r.reason, r.details.error], [false, 'exception', 'boom'])
 })
 
-test('un résultat mal formé devient "bad_result"', async () => {
-    const r = await runSkill(fakeBot(), async () => 'pas un objet', {})
+test('a malformed result becomes "bad_result"', async () => {
+    const r = await runSkill(fakeBot(), async () => 'not an object', {})
     assert.deepStrictEqual([r.success, r.reason], [false, 'bad_result'])
 })

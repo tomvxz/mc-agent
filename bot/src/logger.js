@@ -1,13 +1,13 @@
 const fs = require('fs')
 const path = require('path')
 
-const FICHIER = path.resolve(__dirname, '../../data/transitions.jsonl')
+const DEFAULT_FILE = path.resolve(__dirname, '../../data/transitions.jsonl')
 
-function logTransition(entree) {
-    // TRANSITIONS_FILE permet aux tests hors jeu d'écrire ailleurs que dans le vrai journal
-    const fichier = process.env.TRANSITIONS_FILE || FICHIER
-    fs.mkdirSync(path.dirname(fichier), { recursive: true })
-    fs.appendFileSync(fichier, JSON.stringify(entree) + '\n')
+function logTransition(entry) {
+    // TRANSITIONS_FILE lets offline tests write somewhere other than the real journal
+    const file = process.env.TRANSITIONS_FILE || DEFAULT_FILE
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.appendFileSync(file, JSON.stringify(entry) + '\n')
 }
 
 module.exports = { logTransition }

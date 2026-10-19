@@ -5,42 +5,42 @@ const os = require('os')
 const path = require('path')
 const { fakeBot } = require('./fakeBot')
 
-// Journal temporaire : on n'écrit jamais de fausses lignes dans data/transitions.jsonl
-const fichier = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'mc-agent-')), 'transitions.jsonl')
-process.env.TRANSITIONS_FILE = fichier
+// Temporary journal: fake lines are never written to data/transitions.jsonl
+const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'mc-agent-')), 'transitions.jsonl')
+process.env.TRANSITIONS_FILE = file
 const execute = require('../../src/execute')
 
-const lignes = () => fs.readFileSync(fichier, 'utf8').trim().split('\n').map((l) => JSON.parse(l))
+const lines = () => fs.readFileSync(file, 'utf8').trim().split('\n').map((l) => JSON.parse(l))
 
-test('un nom inconnu échoue ET est journalisé', async () => {
-    const r = await execute(fakeBot(), 'voler', {}, 'unit')
+test('an unknown name fails AND is logged', async () => {
+    const r = await execute(fakeBot(), 'fly', {}, 'unit')
     assert.deepStrictEqual([r.success, r.reason], [false, 'unknown_skill'])
-    const derniere = lignes().at(-1)
-    assert.strictEqual(derniere.reason, 'unknown_skill')
-    assert.strictEqual(derniere.skill.name, 'voler')
-    assert.deepStrictEqual(derniere.state, derniere.next_state)
+    const last = lines().at(-1)
+    assert.strictEqual(last.reason, 'unknown_skill')
+    assert.strictEqual(last.skill.name, 'fly')
+    assert.deepStrictEqual(last.state, last.next_state)
 })
 
-test('un nom hérité de JavaScript ("constructor") n\'est pas une compétence', async () => {
+test('a name inherited from JavaScript ("constructor") is not a skill', async () => {
     const r = await execute(fakeBot(), 'constructor', {}, 'unit')
     assert.strictEqual(r.reason, 'unknown_skill')
 })
 
-test('une vraie compétence est journalisée avec state, next_state et duration', async () => {
-    const r = await execute(fakeBot(), 'mine', { block: 'truc' }, 'unit')
+test('a real skill is logged with state, next_state and duration', async () => {
+    const r = await execute(fakeBot(), 'mine', { block: 'no_such_block' }, 'unit')
     assert.strictEqual(r.reason, 'unknown_block')
-    const d = lignes().at(-1)
-    for (const champ of ['ts', 'source', 'state', 'skill', 'next_state', 'success', 'reason', 'duration']) {
-        assert.ok(champ in d, `champ manquant : ${champ}`)
+    const d = lines().at(-1)
+    for (const field of ['ts', 'source', 'state', 'skill', 'next_state', 'success', 'reason', 'duration']) {
+        assert.ok(field in d, `missing field: ${field}`)
     }
     assert.strictEqual(d.source, 'unit')
 })
 
-test('si observe plante (bot déconnecté), la transition est quand même écrite avec state null', async () => {
+test('if observe throws (bot disconnected), the transition is still written with state null', async () => {
     const bot = fakeBot()
     bot.entity = undefined
-    await execute(bot, 'mine', { block: 'truc' }, 'unit')
-    const d = lignes().at(-1)
+    await execute(bot, 'mine', { block: 'no_such_block' }, 'unit')
+    const d = lines().at(-1)
     assert.strictEqual(d.state, null)
     assert.strictEqual(d.reason, 'unknown_block')
 })

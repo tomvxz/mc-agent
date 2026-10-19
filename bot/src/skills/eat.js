@@ -1,43 +1,43 @@
-const { attendreQue } = require('./outils')
+const { waitUntil } = require('./utils')
 
-// Nourritures qu'on ne choisit jamais toute seule (poison, téléportation...)
-const A_EVITER = ['rotten_flesh', 'spider_eye', 'poisonous_potato', 'pufferfish', 'chorus_fruit', 'suspicious_stew']
+// Foods never picked automatically (poison, teleportation...)
+const AVOID = ['rotten_flesh', 'spider_eye', 'poisonous_potato', 'pufferfish', 'chorus_fruit', 'suspicious_stew']
 
 async function eat(bot, { food } = {}) {
-    const aliments = bot.registry.foodsByName
+    const foods = bot.registry.foodsByName
 
-    // 1. Si un aliment est demandé, il doit exister
+    // 1. If a specific food is requested, it must exist
     if (food !== undefined) {
         if (typeof food !== 'string') return { success: false, reason: 'invalid_args', details: { food } }
-        if (!aliments[food]) return { success: false, reason: 'unknown_item', details: { food } }
+        if (!foods[food]) return { success: false, reason: 'unknown_item', details: { food } }
     }
 
-    // 2. Impossible de manger quand la barre de faim est pleine
-    const avant = bot.food
-    if (avant >= 20) return { success: false, reason: 'not_hungry', details: { food_before: avant } }
+    // 2. Eating is impossible when the hunger bar is full
+    const before = bot.food
+    if (before >= 20) return { success: false, reason: 'not_hungry', details: { food_before: before } }
 
-    // 3. Choisir dans l'inventaire : l'aliment demandé, sinon le plus nourrissant
-    const candidats = bot.inventory.items().filter((i) =>
-        food ? i.name === food : aliments[i.name] && !A_EVITER.includes(i.name)
+    // 3. Pick from the inventory: the requested food, otherwise the most nourishing one
+    const candidates = bot.inventory.items().filter((i) =>
+        food ? i.name === food : foods[i.name] && !AVOID.includes(i.name)
     )
-    if (candidats.length === 0) return { success: false, reason: 'no_food', details: { food, food_before: avant } }
-    candidats.sort((a, b) => aliments[b.name].effectiveQuality - aliments[a.name].effectiveQuality)
-    const choix = candidats[0]
+    if (candidates.length === 0) return { success: false, reason: 'no_food', details: { food, food_before: before } }
+    candidates.sort((a, b) => foods[b.name].effectiveQuality - foods[a.name].effectiveQuality)
+    const choice = candidates[0]
 
     try {
-        // 4. Le prendre en main et le manger
-        await bot.equip(choix, 'hand')
+        // 4. Hold it and eat it
+        await bot.equip(choice, 'hand')
         await bot.consume()
     } catch (e) {
-        return { success: false, reason: 'eat_failed', details: { food: choix.name, food_before: avant, error: e.message } }
+        return { success: false, reason: 'eat_failed', details: { food: choice.name, food_before: before, error: e.message } }
     }
 
-    // 5. Vérifier que la faim est vraiment remontée (le serveur peut répondre un peu après)
-    await attendreQue(() => bot.food > avant, 1000)
-    if (bot.food <= avant) {
-        return { success: false, reason: 'eat_failed', details: { food: choix.name, food_before: avant, food_after: bot.food } }
+    // 5. Check that hunger really went up (the server may answer a little later)
+    await waitUntil(() => bot.food > before, 1000)
+    if (bot.food <= before) {
+        return { success: false, reason: 'eat_failed', details: { food: choice.name, food_before: before, food_after: bot.food } }
     }
-    return { success: true, reason: 'ok', details: { food: choix.name, food_before: avant, food_after: bot.food } }
+    return { success: true, reason: 'ok', details: { food: choice.name, food_before: before, food_after: bot.food } }
 }
 
 module.exports = eat

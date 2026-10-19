@@ -1,38 +1,38 @@
 const { goals } = require('mineflayer-pathfinder')
-const { raisonDeplacement, vecteur, arrondi, compterModifications } = require('./outils')
+const { movementFailureReason, makeVec3, round1, trackWorldChanges } = require('./utils')
 
-// Aller à une position. Le pathfinder se débrouille seul avec les obstacles (voir src/movements.js) :
-// il saute, creuse un passage, monte en tour avec de la terre, ouvre les portes, évite la lave.
+// Go to a position. The pathfinder deals with obstacles on its own (see src/movements.js):
+// it jumps, digs a passage, pillars up with dirt, avoids lava.
 async function move_to(bot, { x, y, z, range = 1 } = {}) {
-    // 1. Les coordonnées doivent être des nombres
+    // 1. Coordinates must be numbers
     if (![x, y, z, range].every(Number.isFinite) || range < 0) {
         return { success: false, reason: 'invalid_args', details: { x, y, z, range } }
     }
 
     const target = [x, y, z]
-    const arreterCompte = compterModifications(bot)
-    // Où en est-on par rapport à la cible, et qu'a-t-on modifié en route ?
-    const bilan = () => {
+    const stopTracking = trackWorldChanges(bot)
+    // Where are we relative to the target, and what did we change on the way?
+    const summary = () => {
         const p = bot.entity.position
         return {
             target,
-            position: [p.x, p.y, p.z].map(arrondi),
-            distance: arrondi(p.distanceTo(vecteur(bot, x, y, z))),
-            ...arreterCompte(),
+            position: [p.x, p.y, p.z].map(round1),
+            distance: round1(p.distanceTo(makeVec3(bot, x, y, z))),
+            ...stopTracking(),
         }
     }
 
     try {
-        // 2. Marcher jusqu'à être à moins de `range` blocs de la cible
+        // 2. Walk until within `range` blocks of the target
         await bot.pathfinder.goto(new goals.GoalNear(x, y, z, range))
     } catch (e) {
-        return { success: false, reason: raisonDeplacement(e), details: { ...bilan(), error: e.message } }
+        return { success: false, reason: movementFailureReason(e), details: { ...summary(), error: e.message } }
     }
 
-    // 3. Vérifier qu'on est vraiment arrivé (+1 car le pathfinder compte en blocs entiers)
-    const arrivee = bilan()
-    if (arrivee.distance > range + 1) return { success: false, reason: 'not_arrived', details: arrivee }
-    return { success: true, reason: 'ok', details: arrivee }
+    // 3. Check that we really arrived (+1 because the pathfinder counts in whole blocks)
+    const arrival = summary()
+    if (arrival.distance > range + 1) return { success: false, reason: 'not_arrived', details: arrival }
+    return { success: true, reason: 'ok', details: arrival }
 }
 
 module.exports = move_to

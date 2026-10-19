@@ -1,51 +1,51 @@
-const { cmd, donner } = require('./arena')
-const { attendreQue } = require('../../src/skills/outils')
+const { runCommand, giveAndWait } = require('./arena')
+const { waitUntil } = require('../../src/skills/utils')
 
-// Fait baisser la faim avec l'effet "faim" très fort, jusqu'à 17 ou moins
-async function affamer(bot) {
+// Lower hunger with a very strong "hunger" effect, down to 17 or less
+async function starve(bot) {
     const u = bot.username
-    await cmd(bot, `/effect give ${u} hunger 20 255 true`)
-    const ok = await attendreQue(() => bot.food <= 17, 20000)
-    await cmd(bot, `/effect clear ${u} hunger`)
-    if (!ok) throw new Error('la faim ne baisse pas') // mise en place ratée
+    await runCommand(bot, `/effect give ${u} hunger 20 255 true`)
+    const ok = await waitUntil(() => bot.food <= 17, 20000)
+    await runCommand(bot, `/effect clear ${u} hunger`)
+    if (!ok) throw new Error('hunger does not go down') // setup failed
 }
 
-// Vérifie que la faim est remontée et qu'un aliment a bien disparu de l'inventaire
-const aMange = (nom) => (r, avant, apres, bot) => {
-    if (bot.food <= avant.food) return `faim ${avant.food} -> ${bot.food}`
-    const delta = (avant.inventory[nom] || 0) - (apres.inventory[nom] || 0)
-    return delta === 1 || `${nom} -${delta}`
+// Check that hunger went up and that one food item left the inventory
+const ate = (name) => (r, before, after, bot) => {
+    if (bot.food <= before.food) return `food ${before.food} -> ${bot.food}`
+    const delta = (before.inventory[name] || 0) - (after.inventory[name] || 0)
+    return delta === 1 || `${name} -${delta}`
 }
 
-const nominaux = [
+const nominal = [
     {
-        nom: 'pain, aliment non précisé',
-        setup: async (bot) => { await donner(bot, 'bread', 3); return affamer(bot) },
+        name: 'bread, no food specified',
+        setup: async (bot) => { await giveAndWait(bot, 'bread', 3); return starve(bot) },
         args: {},
-        verify: aMange('bread'),
+        verify: ate('bread'),
     },
     {
-        nom: 'pomme demandée',
-        setup: async (bot) => { await donner(bot, 'apple', 2); return affamer(bot) },
+        name: 'apple requested',
+        setup: async (bot) => { await giveAndWait(bot, 'apple', 2); return starve(bot) },
         args: { food: 'apple' },
-        verify: aMange('apple'),
+        verify: ate('apple'),
     },
     {
-        nom: 'choisit le steak plutôt que la chair putréfiée',
+        name: 'picks the steak over rotten flesh',
         setup: async (bot) => {
-            await donner(bot, 'rotten_flesh', 5)
-            await donner(bot, 'cooked_beef', 1)
-            return affamer(bot)
+            await giveAndWait(bot, 'rotten_flesh', 5)
+            await giveAndWait(bot, 'cooked_beef', 1)
+            return starve(bot)
         },
         args: {},
-        verify: aMange('cooked_beef'),
+        verify: ate('cooked_beef'),
     },
 ]
 
-const limites = [
-    { nom: 'pas faim', setup: (bot) => donner(bot, 'bread', 3), args: {}, expect: 'not_hungry' },
-    { nom: 'rien à manger', setup: affamer, args: {}, expect: 'no_food' },
-    { nom: 'aliment inconnu', args: { food: 'diamond' }, expect: 'unknown_item' },
+const edgeCases = [
+    { name: 'not hungry', setup: (bot) => giveAndWait(bot, 'bread', 3), args: {}, expect: 'not_hungry' },
+    { name: 'nothing to eat', setup: starve, args: {}, expect: 'no_food' },
+    { name: 'unknown food', args: { food: 'diamond' }, expect: 'unknown_item' },
 ]
 
-module.exports = { skill: 'eat', nominaux, limites }
+module.exports = { skill: 'eat', nominal, edgeCases }

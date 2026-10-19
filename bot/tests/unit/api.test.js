@@ -5,86 +5,86 @@ const os = require('os')
 const path = require('path')
 const { fakeBot } = require('./fakeBot')
 
-// Journal temporaire : on n'écrit jamais de fausses lignes dans data/transitions.jsonl
-const fichier = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'mc-agent-api-')), 'transitions.jsonl')
-process.env.TRANSITIONS_FILE = fichier
-const { demarrerApi } = require('../../src/api')
+// Temporary journal: fake lines are never written to data/transitions.jsonl
+const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'mc-agent-api-')), 'transitions.jsonl')
+process.env.TRANSITIONS_FILE = file
+const { startApi } = require('../../src/api')
 const skills = require('../../src/skills')
-const { CATALOGUE } = require('../../src/skills/catalogue')
+const { CATALOGUE, CATALOGUE_VERSION } = require('../../src/skills/catalogue')
 
-const derniereLigne = () => JSON.parse(fs.readFileSync(fichier, 'utf8').trim().split('\n').at(-1))
+const lastLine = () => JSON.parse(fs.readFileSync(file, 'utf8').trim().split('\n').at(-1))
 
-// Démarre l'API sur un port libre (port 0 = "choisis-en un") et renvoie l'adresse de base
+// Start the API on a free port (port 0 = "pick one") and return its base URL
 async function api(bot) {
-    const serveur = await demarrerApi(bot, { port: 0 })
-    test.after(() => serveur.close())
-    return `http://127.0.0.1:${serveur.address().port}`
+    const server = await startApi(bot, { port: 0 })
+    test.after(() => server.close())
+    return `http://127.0.0.1:${server.address().port}`
 }
-const poster = (base, corps) => fetch(`${base}/execute`, { method: 'POST', body: typeof corps === 'string' ? corps : JSON.stringify(corps) })
+const post = (base, body) => fetch(`${base}/execute`, { method: 'POST', body: typeof body === 'string' ? body : JSON.stringify(body) })
 
-test('le catalogue décrit exactement les compétences du code', () => {
+test('the catalogue describes exactly the skills in the code', () => {
     assert.deepStrictEqual(Object.keys(CATALOGUE).sort(), Object.keys(skills).sort())
-    for (const [nom, fiche] of Object.entries(CATALOGUE)) {
-        assert.ok(fiche.description.length > 20, `${nom} : description trop courte`)
-        assert.strictEqual(fiche.parameters.type, 'object', `${nom} : parameters doit être un JSON Schema d'objet`)
-        for (const requis of fiche.parameters.required || []) assert.ok(requis in fiche.parameters.properties, `${nom} : ${requis}`)
-        assert.ok(Object.keys(fiche.reasons).length > 0, `${nom} : aucune raison d'échec`)
+    for (const [name, entry] of Object.entries(CATALOGUE)) {
+        assert.ok(entry.description.length > 20, `${name}: description too short`)
+        assert.strictEqual(entry.parameters.type, 'object', `${name}: parameters must be an object JSON Schema`)
+        for (const required of entry.parameters.required || []) assert.ok(required in entry.parameters.properties, `${name}: ${required}`)
+        assert.ok(Object.keys(entry.reasons).length > 0, `${name}: no failure reason`)
     }
 })
 
-test('GET /skills et GET /state', async () => {
+test('GET /skills and GET /state', async () => {
     const base = await api(fakeBot({ inventory: { bread: 2 } }))
     const s = await (await fetch(`${base}/skills`)).json()
-    assert.strictEqual(s.catalogue_version, 1)
+    assert.strictEqual(s.catalogue_version, CATALOGUE_VERSION)
     assert.ok(s.skills.move_to && s.common_reasons.timeout)
-    const etat = await (await fetch(`${base}/state`)).json()
-    assert.deepStrictEqual(etat.inventory, { bread: 2 })
+    const state = await (await fetch(`${base}/state`)).json()
+    assert.deepStrictEqual(state.inventory, { bread: 2 })
 })
 
-test('GET /state répond 503 si le bot est déconnecté', async () => {
+test('GET /state answers 503 when the bot is disconnected', async () => {
     const bot = fakeBot()
     bot.entity = undefined
     const r = await fetch(`${await api(bot)}/state`)
     assert.strictEqual(r.status, 503)
 })
 
-test('POST /execute exécute, renvoie le résultat et journalise episode_id et step', async () => {
+test('POST /execute runs the skill, returns the result and logs episode_id and step', async () => {
     const base = await api(fakeBot())
-    const r = await poster(base, { name: 'find', args: { target: 'truc' }, source: 'brain', episode_id: 'ep-1', step: 3 })
+    const r = await post(base, { name: 'find', args: { target: 'no_such_thing' }, source: 'brain', episode_id: 'ep-1', step: 3 })
     assert.strictEqual(r.status, 200)
-    const resultat = await r.json()
-    assert.deepStrictEqual([resultat.success, resultat.reason], [false, 'unknown_target'])
-    const ligne = derniereLigne()
-    assert.deepStrictEqual([ligne.schema_version, ligne.source, ligne.episode_id, ligne.step], [1, 'brain', 'ep-1', 3])
+    const result = await r.json()
+    assert.deepStrictEqual([result.success, result.reason], [false, 'unknown_target'])
+    const line = lastLine()
+    assert.deepStrictEqual([line.schema_version, line.source, line.episode_id, line.step], [1, 'brain', 'ep-1', 3])
 })
 
-test('POST /execute : nom inconnu = résultat unknown_skill (pas une erreur HTTP)', async () => {
-    const r = await poster(await api(fakeBot()), { name: 'voler' })
+test('POST /execute: unknown name = unknown_skill result (not an HTTP error)', async () => {
+    const r = await post(await api(fakeBot()), { name: 'fly' })
     assert.strictEqual(r.status, 200)
     assert.strictEqual((await r.json()).reason, 'unknown_skill')
 })
 
-test('POST /execute : requêtes mal formées -> 400', async () => {
+test('POST /execute: malformed requests -> 400', async () => {
     const base = await api(fakeBot())
-    for (const corps of ['pas du json', '[]', { args: {} }, { name: 'find', args: [] }, { name: 'find', step: 1.5 }]) {
-        const r = await poster(base, corps)
-        assert.strictEqual(r.status, 400, JSON.stringify(corps))
+    for (const body of ['not json', '[]', { args: {} }, { name: 'find', args: [] }, { name: 'find', step: 1.5 }]) {
+        const r = await post(base, body)
+        assert.strictEqual(r.status, 400, JSON.stringify(body))
     }
 })
 
-test('POST /execute : une seule compétence à la fois -> 409 busy', async () => {
+test('POST /execute: one skill at a time -> 409 busy', async () => {
     const bot = fakeBot()
-    bot.pathfinder.goto = () => new Promise((r) => setTimeout(r, 300)) // un déplacement qui dure
+    bot.pathfinder.goto = () => new Promise((r) => setTimeout(r, 300)) // a move that takes a while
     const base = await api(bot)
     const [a, b] = await Promise.all([
-        poster(base, { name: 'move_to', args: { x: 0, y: 100, z: 0 } }),
-        new Promise((r) => setTimeout(r, 50)).then(() => poster(base, { name: 'scan' })),
+        post(base, { name: 'move_to', args: { x: 0, y: 100, z: 0 } }),
+        new Promise((r) => setTimeout(r, 50)).then(() => post(base, { name: 'scan' })),
     ])
     assert.deepStrictEqual([a.status, b.status], [200, 409])
 })
 
-test('routes inconnues -> 404, mauvaise méthode -> 405', async () => {
+test('unknown routes -> 404, wrong method -> 405', async () => {
     const base = await api(fakeBot())
-    assert.strictEqual((await fetch(`${base}/truc`)).status, 404)
+    assert.strictEqual((await fetch(`${base}/nowhere`)).status, 404)
     assert.strictEqual((await fetch(`${base}/execute`)).status, 405)
 })

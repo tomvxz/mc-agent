@@ -1,95 +1,95 @@
 const { Movements } = require('mineflayer-pathfinder')
 const { isHostile } = require('./state')
 
-// Réglages de déplacement du pathfinder.
-// Principe : le LLM décide OÙ aller, le pathfinder décide COMMENT passer les obstacles
-// (sauter, creuser, monter en tour, ouvrir une porte). On ajoute des instincts pour que
-// ces capacités ne tuent pas le bot et ne cassent pas ce qui compte.
+// Pathfinder movement settings.
+// Principle: the LLM decides WHERE to go, the pathfinder decides HOW to get past obstacles
+// (jump, dig, pillar up, open a door). We add instincts so that these abilities do not kill
+// the bot or break things that matter.
 
-// Correction d'un bug : le pathfinder accepte une diagonale dès qu'UN des deux côtés est libre ;
-// le bot frôle alors l'angle du bloc et reste coincé contre lui (vu dans les tests de move_to).
-// On exige donc que les DEUX côtés soient libres.
-class MovementsSansCoin extends Movements {
+// Bug fix: the pathfinder accepts a diagonal move as soon as ONE of the two sides is free;
+// the bot then brushes the block's corner and gets stuck against it (seen in move_to tests).
+// So we require BOTH sides to be free.
+class NoCornerCutMovements extends Movements {
     getMoveDiagonal(node, dir, neighbors) {
-        // y = 1 si la diagonale monte d'une marche
+        // y = 1 if the diagonal steps up one block
         const y = this.getBlock(node, dir.x, 0, dir.z).physical ? 1 : 0
         for (const [dx, dz] of [[dir.x, 0], [0, dir.z]]) {
-            // Les pieds et la tête doivent passer de chaque côté
+            // Feet and head must fit on each side
             if (!this.getBlock(node, dx, y, dz).safe || !this.getBlock(node, dx, y + 1, dz).safe) return
         }
         super.getMoveDiagonal(node, dir, neighbors)
     }
 }
 
-// Blocs à ne jamais traverser (la lave, le feu et les toiles sont déjà évités par défaut)
-const A_EVITER = ['soul_fire', 'cactus', 'sweet_berry_bush', 'powder_snow', 'wither_rose']
-// Blocs sur lesquels ne jamais marcher (ils brûlent)
-const SOL_DANGEREUX = ['magma_block', 'campfire', 'soul_campfire']
-// Blocs utiles à ne jamais casser en passant
-// (+ tous les lits, portes et portillons, ajoutés plus bas)
-const A_PROTEGER = ['chest', 'trapped_chest', 'ender_chest', 'barrel', 'furnace', 'blast_furnace', 'smoker',
+// Blocks never to walk through (lava, fire and cobwebs are already avoided by default)
+const AVOID = ['soul_fire', 'cactus', 'sweet_berry_bush', 'powder_snow', 'wither_rose']
+// Blocks never to stand on (they burn)
+const DANGEROUS_FLOOR = ['magma_block', 'campfire', 'soul_campfire']
+// Useful blocks never to break on the way
+// (+ every bed, door and fence gate, added below)
+const PROTECTED = ['chest', 'trapped_chest', 'ender_chest', 'barrel', 'furnace', 'blast_furnace', 'smoker',
     'crafting_table', 'anvil', 'enchanting_table']
-// Blocs "jetables" que le pathfinder peut poser pour monter ou faire un pont
-const ECHAFAUDAGE = ['dirt', 'cobblestone', 'cobbled_deepslate', 'netherrack']
+// "Throwaway" blocks the pathfinder may place to pillar up or bridge
+const SCAFFOLDING_BLOCKS = ['dirt', 'cobblestone', 'cobbled_deepslate', 'netherrack']
 
-const DISTANCE_MONSTRE = 4 // les cases plus proches d'un monstre coûtent plus cher
-const COUT_MONSTRE = 20
+const HOSTILE_DISTANCE = 4 // cells closer than this to a monster cost more
+const HOSTILE_COST = 20
 
-function creer(bot) {
+function create(bot) {
     const r = bot.registry
-    const m = new MovementsSansCoin(bot)
+    const m = new NoCornerCutMovements(bot)
 
-    // Capacités : on garde celles du pathfinder (parkour, sprint, creuser, tours) et on les règle
+    // Abilities: keep the pathfinder's own (parkour, sprint, digging, pillaring) and tune them
     m.canDig = true
-    m.digCost = 2 // creuser coûte : il préfère contourner un petit obstacle
+    m.digCost = 2 // digging has a cost: it prefers going around a small obstacle
     m.allow1by1towers = true
     m.placeCost = 2
-    m.scafoldingBlocks = ECHAFAUDAGE.map((n) => r.itemsByName[n].id)
-    // Pas d'ouverture de portes : dans cette version du pathfinder, l'option ne gère que les portillons,
-    // et même là, en test, il cassait le portillon ou restait bloqué devant en se disant arrivé.
-    // Une porte fermée donne donc no_path ; l'ouvrir sera le rôle de use_item (lot 2).
+    m.scafoldingBlocks = SCAFFOLDING_BLOCKS.map((n) => r.itemsByName[n].id)
+    // No door opening: in this pathfinder version the option only handles fence gates, and even
+    // then, in tests, it broke the gate or got stuck in front of it while reporting arrival.
+    // A closed door therefore gives no_path; opening it will be use_item's job (batch 2).
     m.canOpenDoors = false
 
     // Instincts
-    m.liquidCost = 3 // l'eau coûte plus cher : il la contourne s'il peut
-    m.maxDropDown = 3 // pas de chute de plus de 3 blocs (pas de dégâts)
-    for (const n of A_EVITER) m.blocksToAvoid.add(r.blocksByName[n].id)
-    for (const n of A_PROTEGER) m.blocksCantBreak.add(r.blocksByName[n].id)
+    m.liquidCost = 3 // water costs more: go around it when possible
+    m.maxDropDown = 3 // no fall higher than 3 blocks (no damage)
+    for (const n of AVOID) m.blocksToAvoid.add(r.blocksByName[n].id)
+    for (const n of PROTECTED) m.blocksCantBreak.add(r.blocksByName[n].id)
     for (const n of Object.keys(r.blocksByName)) {
         if (n.endsWith('_bed') || n.endsWith('_door') || n.endsWith('_fence_gate')) m.blocksCantBreak.add(r.blocksByName[n].id)
     }
-    const solDangereux = new Set(SOL_DANGEREUX.map((n) => r.blocksByName[n].id))
+    const dangerousFloor = new Set(DANGEROUS_FLOOR.map((n) => r.blocksByName[n].id))
 
-    // Position des monstres, recalculée au plus une fois par seconde (le pathfinder
-    // appelle cette fonction pour chaque case qu'il envisage : il faut qu'elle soit rapide)
-    let monstres = []
-    let dateMonstres = 0
-    const positionsMonstres = () => {
-        if (Date.now() - dateMonstres > 1000) {
-            monstres = Object.values(bot.entities).filter((e) => isHostile(e) && e.position).map((e) => e.position)
-            dateMonstres = Date.now()
+    // Monster positions, recomputed at most once per second (the pathfinder calls this
+    // function for every cell it considers: it has to be fast)
+    let hostiles = []
+    let hostilesTime = 0
+    const hostilePositions = () => {
+        if (Date.now() - hostilesTime > 1000) {
+            hostiles = Object.values(bot.entities).filter((e) => isHostile(e) && e.position).map((e) => e.position)
+            hostilesTime = Date.now()
         }
-        return monstres
+        return hostiles
     }
 
-    // Coût supplémentaire pour poser les pieds sur une case
+    // Extra cost for stepping onto a cell
     m.exclusionAreasStep.push((block) => {
         const p = block.position
-        const dessous = bot.blockAt(p.offset(0, -1, 0))
-        if (dessous && solDangereux.has(dessous.type)) return 100 // 100 = interdit
-        for (const pos of positionsMonstres()) {
-            if (pos.distanceTo(p) < DISTANCE_MONSTRE) return COUT_MONSTRE
+        const below = bot.blockAt(p.offset(0, -1, 0))
+        if (below && dangerousFloor.has(below.type)) return 100 // 100 = forbidden
+        for (const pos of hostilePositions()) {
+            if (pos.distanceTo(p) < HOSTILE_DISTANCE) return HOSTILE_COST
         }
         return 0
     })
     return m
 }
 
-// Un seul réglage par bot, créé une fois (sa construction parcourt tous les blocs du jeu)
+// One settings object per bot, created once (building it walks every block of the game)
 const cache = new WeakMap()
-function reglages(bot) {
-    if (!cache.has(bot)) cache.set(bot, creer(bot))
+function getMovements(bot) {
+    if (!cache.has(bot)) cache.set(bot, create(bot))
     return cache.get(bot)
 }
 
-module.exports = { reglages, MovementsSansCoin, ECHAFAUDAGE }
+module.exports = { getMovements, NoCornerCutMovements, SCAFFOLDING_BLOCKS }

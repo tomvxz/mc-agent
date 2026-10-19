@@ -1,109 +1,109 @@
-// L'API HTTP du corps : c'est par là que le cerveau (Python) parle au bot.
-// Le corps ne décide rien : il donne l'état, décrit ses compétences et exécute ce qu'on lui demande.
+// The body's HTTP API: this is how the brain (Python) talks to the bot.
+// The body decides nothing: it reports its state, describes its skills and runs what it is asked to.
 //   GET  /state    -> observe(bot)
-//   GET  /skills   -> le catalogue des compétences (src/skills/catalogue.js)
-//   POST /execute  -> { name, args, source, episode_id, step } : exécute UNE compétence (journalisée)
-// Utilise le module http inclus dans Node : aucune dépendance.
+//   GET  /skills   -> the skill catalogue (src/skills/catalogue.js)
+//   POST /execute  -> { name, args, source, episode_id, step }: runs ONE skill (logged)
+// Uses Node's built-in http module: no dependency.
 
 const http = require('http')
 const execute = require('./execute')
 const { observe } = require('./state')
-const { CATALOGUE, CATALOGUE_VERSION, RAISONS_COMMUNES } = require('./skills/catalogue')
+const { CATALOGUE, CATALOGUE_VERSION, COMMON_REASONS } = require('./skills/catalogue')
 
-const TAILLE_MAX = 100 * 1024 // un corps de requête plus gros est refusé
+const MAX_BODY_SIZE = 100 * 1024 // larger request bodies are rejected
 
-// Envoie une réponse JSON
-function repondre(res, code, donnees) {
-    const texte = JSON.stringify(donnees)
-    res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Length': Buffer.byteLength(texte) })
-    res.end(texte)
+// Send a JSON response
+function reply(res, code, data) {
+    const text = JSON.stringify(data)
+    res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Length': Buffer.byteLength(text) })
+    res.end(text)
 }
 
-// Lit le corps de la requête et le transforme en objet (ou lève une erreur)
-function lireJson(req) {
+// Read the request body and parse it as JSON (or throw)
+function readJson(req) {
     return new Promise((resolve, reject) => {
-        let texte = ''
-        req.on('data', (morceau) => {
-            texte += morceau
-            if (texte.length > TAILLE_MAX) reject(new Error('requête trop grosse'))
+        let text = ''
+        req.on('data', (chunk) => {
+            text += chunk
+            if (text.length > MAX_BODY_SIZE) reject(new Error('request too large'))
         })
         req.on('end', () => {
             try {
-                resolve(texte ? JSON.parse(texte) : {})
+                resolve(text ? JSON.parse(text) : {})
             } catch (e) {
-                reject(new Error('JSON invalide'))
+                reject(new Error('invalid JSON'))
             }
         })
         req.on('error', reject)
     })
 }
 
-// Vérifie une demande d'exécution ; renvoie un message d'erreur, ou null si tout va bien
-function verifierDemande(d) {
-    if (typeof d !== 'object' || d === null || Array.isArray(d)) return 'le corps doit être un objet JSON'
-    if (typeof d.name !== 'string') return 'name doit être un texte'
-    if (d.args !== undefined && (typeof d.args !== 'object' || d.args === null || Array.isArray(d.args))) return 'args doit être un objet'
-    if (d.source !== undefined && typeof d.source !== 'string') return 'source doit être un texte'
-    if (d.episode_id !== undefined && typeof d.episode_id !== 'string') return 'episode_id doit être un texte'
-    if (d.step !== undefined && !Number.isInteger(d.step)) return 'step doit être un entier'
+// Check an execute request; returns an error message, or null if everything is fine
+function validateRequest(d) {
+    if (typeof d !== 'object' || d === null || Array.isArray(d)) return 'the body must be a JSON object'
+    if (typeof d.name !== 'string') return 'name must be a string'
+    if (d.args !== undefined && (typeof d.args !== 'object' || d.args === null || Array.isArray(d.args))) return 'args must be an object'
+    if (d.source !== undefined && typeof d.source !== 'string') return 'source must be a string'
+    if (d.episode_id !== undefined && typeof d.episode_id !== 'string') return 'episode_id must be a string'
+    if (d.step !== undefined && !Number.isInteger(d.step)) return 'step must be an integer'
     return null
 }
 
-function demarrerApi(bot, { port = 3000, host = '127.0.0.1' } = {}) {
-    // Une seule compétence à la fois : le bot n'a qu'un corps
-    let occupe = false
+function startApi(bot, { port = 3000, host = '127.0.0.1' } = {}) {
+    // One skill at a time: the bot only has one body
+    let busy = false
 
-    const serveur = http.createServer(async (req, res) => {
+    const server = http.createServer(async (req, res) => {
         try {
             if (req.method === 'GET' && req.url === '/state') {
-                let etat
+                let state
                 try {
-                    etat = observe(bot)
+                    state = observe(bot)
                 } catch (e) {
-                    return repondre(res, 503, { error: 'bot_unavailable', message: e.message }) // mort ou déconnecté
+                    return reply(res, 503, { error: 'bot_unavailable', message: e.message }) // dead or disconnected
                 }
-                return repondre(res, 200, etat)
+                return reply(res, 200, state)
             }
 
             if (req.method === 'GET' && req.url === '/skills') {
-                return repondre(res, 200, { catalogue_version: CATALOGUE_VERSION, common_reasons: RAISONS_COMMUNES, skills: CATALOGUE })
+                return reply(res, 200, { catalogue_version: CATALOGUE_VERSION, common_reasons: COMMON_REASONS, skills: CATALOGUE })
             }
 
             if (req.method === 'POST' && req.url === '/execute') {
-                let demande
+                let request
                 try {
-                    demande = await lireJson(req)
+                    request = await readJson(req)
                 } catch (e) {
-                    return repondre(res, 400, { error: 'invalid_request', message: e.message })
+                    return reply(res, 400, { error: 'invalid_request', message: e.message })
                 }
-                const probleme = verifierDemande(demande)
-                if (probleme) return repondre(res, 400, { error: 'invalid_request', message: probleme })
-                if (occupe) return repondre(res, 409, { error: 'busy', message: 'une compétence est déjà en cours' })
+                const problem = validateRequest(request)
+                if (problem) return reply(res, 400, { error: 'invalid_request', message: problem })
+                if (busy) return reply(res, 409, { error: 'busy', message: 'a skill is already running' })
 
-                occupe = true
+                busy = true
                 try {
-                    const { name, args = {}, source = 'api', episode_id, step } = demande
-                    // Un nom inconnu n'est pas une erreur HTTP : execute renvoie (et journalise) unknown_skill
-                    const resultat = await execute(bot, name, args, source, { episode_id, step })
-                    return repondre(res, 200, resultat)
+                    const { name, args = {}, source = 'api', episode_id, step } = request
+                    // An unknown name is not an HTTP error: execute returns (and logs) unknown_skill
+                    const result = await execute(bot, name, args, source, { episode_id, step })
+                    return reply(res, 200, result)
                 } finally {
-                    occupe = false
+                    busy = false
                 }
             }
 
-            const routeExiste = ['/state', '/skills', '/execute'].includes(req.url)
-            return repondre(res, routeExiste ? 405 : 404, { error: routeExiste ? 'method_not_allowed' : 'not_found' })
+            const routeExists = ['/state', '/skills', '/execute'].includes(req.url)
+            return reply(res, routeExists ? 405 : 404, { error: routeExists ? 'method_not_allowed' : 'not_found' })
         } catch (e) {
-            // Rien ne doit faire tomber le serveur
-            console.error('[api] erreur :', e)
-            if (!res.headersSent) repondre(res, 500, { error: 'internal_error', message: e.message })
+            // Nothing may bring the server down
+            console.error('[api] error:', e)
+            if (!res.headersSent) reply(res, 500, { error: 'internal_error', message: e.message })
         }
     })
 
     return new Promise((resolve, reject) => {
-        serveur.once('error', reject)
-        serveur.listen(port, host, () => resolve(serveur))
+        server.once('error', reject)
+        server.listen(port, host, () => resolve(server))
     })
 }
 
-module.exports = { demarrerApi }
+module.exports = { startApi }

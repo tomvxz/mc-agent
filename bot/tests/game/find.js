@@ -1,40 +1,40 @@
-const { cmd, poser, CENTRE: C } = require('./arena')
-const { attendreQue } = require('../../src/skills/outils')
+const { runCommand, placeAndWait, CENTER: C } = require('./arena')
+const { waitUntil } = require('../../src/skills/utils')
 const { isHostile } = require('../../src/state')
 
-// Des bûches à des distances connues : la plus proche doit sortir en premier
-const BUCHES = [[12, 0], [3, 4], [-15, -10]] // [dx, dz] -> distances ~12, 5, 18
-const PLUS_PROCHE = [C.x + 3, C.y, C.z + 4]
+// Logs at known distances: the nearest must come first
+const LOGS = [[12, 0], [3, 4], [-15, -10]] // [dx, dz] -> distances ~12, 5, 18
+const NEAREST = [C.x + 3, C.y, C.z + 4]
 
-const nominaux = [
+const nominal = [
     {
-        nom: 'bûches triées par distance',
+        name: 'logs sorted by distance',
         setup: async (bot) => {
-            for (const [dx, dz] of BUCHES) await poser(bot, `/setblock ${C.x + dx} ${C.y} ${C.z + dz} oak_log`, [C.x + dx, C.y, C.z + dz], 'oak_log')
+            for (const [dx, dz] of LOGS) await placeAndWait(bot, `/setblock ${C.x + dx} ${C.y} ${C.z + dz} oak_log`, [C.x + dx, C.y, C.z + dz], 'oak_log')
         },
         args: { target: 'oak_log' },
         verify: (r) => {
             const m = r.details.matches
-            if (m.length !== BUCHES.length) return `${m.length} bûches trouvées au lieu de ${BUCHES.length}`
-            const premier = [m[0].x, m[0].y, m[0].z].join(',')
-            return premier === PLUS_PROCHE.join(',') || `la plus proche annoncée est ${premier}`
+            if (m.length !== LOGS.length) return `${m.length} logs found instead of ${LOGS.length}`
+            const first = [m[0].x, m[0].y, m[0].z].join(',')
+            return first === NEAREST.join(',') || `the reported nearest is ${first}`
         },
     },
     {
-        nom: 'un husk trouvé avec "hostile"',
+        name: 'a husk found with "hostile"',
         setup: async (bot) => {
-            await cmd(bot, `/summon husk ${C.x + 6.5} ${C.y} ${C.z + 0.5} {NoAI:1b}`)
-            if (!(await attendreQue(() => Object.values(bot.entities).some(isHostile), 3000))) throw new Error('husk invisible')
+            await runCommand(bot, `/summon husk ${C.x + 6.5} ${C.y} ${C.z + 0.5} {NoAI:1b}`)
+            if (!(await waitUntil(() => Object.values(bot.entities).some(isHostile), 3000))) throw new Error('husk invisible')
         },
         args: { target: 'hostile' },
         verify: (r) => (r.details.matches[0].name === 'husk' && Math.abs(r.details.matches[0].distance - 6) < 1.5) ||
-            `trouvé : ${JSON.stringify(r.details.matches[0])}`,
+            `found: ${JSON.stringify(r.details.matches[0])}`,
     },
 ]
 
-const limites = [
-    { nom: 'rien de tel autour', args: { target: 'diamond_ore' }, expect: 'not_found' },
-    { nom: 'cible inconnue', args: { target: 'truc' }, expect: 'unknown_target' },
+const edgeCases = [
+    { name: 'nothing like that around', args: { target: 'diamond_ore' }, expect: 'not_found' },
+    { name: 'unknown target', args: { target: 'no_such_thing' }, expect: 'unknown_target' },
 ]
 
-module.exports = { skill: 'find', nominaux, limites }
+module.exports = { skill: 'find', nominal, edgeCases }
