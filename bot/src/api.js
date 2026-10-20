@@ -4,11 +4,14 @@
 //   GET  /skills   -> the skills shown to the LLM (src/skills/catalogue.js); /skills?all=1 -> all of them
 //   GET  /run      -> the current run: run_id, purpose, data_dir, versions... (src/run.js)
 //   POST /execute  -> { name, args, source, episode_id, turn }: runs ONE skill (logged)
+//   POST /setup    -> { x, z, inventory }: puts the bot in a starting situation for a bench (src/setup.js;
+//                     server commands, not a skill, not logged)
 // Uses Node's built-in http module: no dependency.
 
 import http from "node:http";
 import execute from "./execute.js";
 import { currentRun } from "./run.js";
+import { setupPlace } from "./setup.js";
 import { CATALOGUE, COMMON_REASONS, SHOWN_TO_LLM } from "./skills/catalogue.js";
 import { observe } from "./state.js";
 
@@ -61,6 +64,25 @@ function validateRequest(d) {
     return "turn must be an integer";
   const allowed = ["name", "args", "source", "episode_id", "turn"];
   const unknown = Object.keys(d).filter((k) => !allowed.includes(k));
+  if (unknown.length) return `unknown fields: ${unknown.join(", ")}`;
+  return null;
+}
+
+// Check a setup request; returns an error message, or null if everything is fine
+function validateSetup(d, bot) {
+  if (typeof d !== "object" || d === null || Array.isArray(d))
+    return "the body must be a JSON object";
+  if (!Number.isInteger(d.x) || !Number.isInteger(d.z))
+    return "x and z must be integers";
+  const inventory = d.inventory ?? {};
+  if (typeof inventory !== "object" || inventory === null || Array.isArray(inventory))
+    return "inventory must be an object { item: count }";
+  for (const [item, count] of Object.entries(inventory)) {
+    if (!bot.registry.itemsByName[item]) return `unknown item: ${item}`;
+    if (!Number.isInteger(count) || count < 1 || count > 2304)
+      return `invalid count for ${item}`;
+  }
+  const unknown = Object.keys(d).filter((k) => !["x", "z", "inventory"].includes(k));
   if (unknown.length) return `unknown fields: ${unknown.join(", ")}`;
   return null;
 }
@@ -144,7 +166,28 @@ function startApi(bot, { port = 3000, host = "127.0.0.1" } = {}) {
         }
       }
 
-      const routeExists = ["/state", "/skills", "/run", "/execute"].includes(
+      if (req.method === "POST" && req.url === "/setup") {
+        let request;
+        try {
+          request = await readJson(req);
+        } catch (e) {
+          return reply(res, 400, { error: "invalid_request", message: e.message });
+        }
+        const problem = validateSetup(request, bot);
+        if (problem)
+          return reply(res, 400, { error: "invalid_request", message: problem });
+        if (busy)
+          return reply(res, 409, { error: "busy", message: "a skill is already running" });
+
+        busy = true;
+        try {
+          return reply(res, 200, await setupPlace(bot, request));
+        } finally {
+          busy = false;
+        }
+      }
+
+      const routeExists = ["/state", "/skills", "/run", "/execute", "/setup"].includes(
         req.url,
       );
       return reply(res, routeExists ? 405 : 404, {

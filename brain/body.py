@@ -1,10 +1,11 @@
 """The link between the brain (Python) and the body (the Node bot, see bot/src/api.js).
 
-The body exposes 4 HTTP routes; this module turns them into 4 Python methods:
+The body exposes 5 HTTP routes; this module turns them into 5 Python methods:
     state()                        -> the bot's observed state (position, health, inventory...)
     run()                          -> the current run (run_id, purpose, data folder, versions)
     skills()                       -> the skill catalogue (descriptions, parameters, failure reasons)
     execute(name, args, ...)       -> runs ONE skill and returns {success, reason, details, duration}
+    setup(x, z, inventory)         -> puts the bot in a starting situation, for benches (not a skill)
 
 Two kinds of failure, not to be confused:
 - GAME failure: execute() returns a normal result with success=False (e.g. reason="no_path").
@@ -26,6 +27,7 @@ import httpx
 # A skill can last up to 60 s (runSkill's limit on the Node side): wait a little longer
 EXECUTE_TIMEOUT = 70.0
 SHORT_TIMEOUT = 5.0  # for /state and /skills, which answer immediately
+SETUP_TIMEOUT = 45.0  # teleport + chunks loading (up to 15 s) + commands
 
 
 def default_url() -> str:
@@ -110,6 +112,17 @@ class Body:
         optional = {"episode_id": episode_id, "turn": turn}
         request.update({k: v for k, v in optional.items() if v is not None})
         return self._request("POST", "/execute", json=request, timeout=EXECUTE_TIMEOUT)
+
+    def setup(
+        self, x: int, z: int, inventory: dict[str, int] | None = None
+    ) -> dict[str, Any]:
+        """Teleport the bot onto the ground at column (x, z), with exactly this inventory, by day
+        and clear weather (bot/src/setup.js). Returns {success, reason, details}.
+
+        Server commands, not a skill: not logged as a transition, never offered to the LLM.
+        """
+        request = {"x": x, "z": z, "inventory": inventory or {}}
+        return self._request("POST", "/setup", json=request, timeout=SETUP_TIMEOUT)
 
     def close(self) -> None:
         self._client.close()

@@ -244,7 +244,10 @@ program crashes mid-episode). Every event has:
   "run_id": "run-…",                          // the body's run (null if unknown)
   "goal": "craft a wooden pickaxe",
   "scenario": "arena:trees_3",                // optional: the task setting
-  "model": { "provider": "ollama", "name": "qwen3:8b", "params": { "temperature": 0.2, "seed": 42 } },
+  "model": { "provider": "openai_compatible", "base_url": "http://127.0.0.1:11434/v1", "name": "qwen2.5:3b",
+             "params": { "temperature": 0.2, "seed": 42,
+                         "context_length": 16384 } },   // as loaded by the server (null if unknown);
+                                                        //   past it the server cuts the conversation
   "code_version": "6fc30a3",                  // the git commit (+dirty if uncommitted changes)
   "system_prompt": "…",                       // sent once: it does not change during the episode
   "tools": [ … ],                             // tool definitions sent to the LLM: one per skill + goal_reached, missing_capability
@@ -271,6 +274,16 @@ The exact conversation of turn `n` is: `system_prompt` + `tools` + the `new_mess
 `0..n`, concatenated. The skill calls of the plan are the transitions with the same `episode_id`
 and `turn`.
 
+Messages use the OpenAI chat format:
+```jsonc
+{ "role": "user", "content": "Goal: …\n\nPosition: …" }                    // goal, new state, error feedback
+{ "role": "assistant", "content": "",                                       // the LLM's previous answer,
+  "tool_calls": [ { "id": "call_ab12", "type": "function",                  //   put back as tool calls
+                    "function": { "name": "find", "arguments": "{\"target\": \"oak_log\"}" } } ] }
+{ "role": "tool", "tool_call_id": "call_ab12", "content": "find(target='oak_log'): ok {…}" }  // one per call
+```
+An unusable answer is put back as `{ "role": "assistant", "content": "<its text>" }`.
+
 `episode_end`, written once, also after a crash when possible:
 ```jsonc
 { "schema_version": 1, "type": "episode_end", "episode_id": "ep-…", "seq": 9, "ts": "…",
@@ -286,6 +299,10 @@ and `turn`.
 ```
 `brain/journal.py` writes an `episode_end` automatically (reason `crash` or `interrupted`) when
 the code exits on an exception. An episode without `episode_end` was killed hard (process killed).
+
+Before commit `eb6a997` (October 20, 2026, development data only): a single tool `propose_plans`
+whose arguments held the plan, the results of a plan sent back as ONE user message, and the
+state shown with a context of 4096 tokens (conversations cut after about 6 turns).
 
 Planned for later (step 6d / 8): model quantization, `why` per planned call,
 the world model's predictions per candidate and the final choice, surprise after execution.

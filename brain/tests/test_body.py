@@ -125,3 +125,14 @@ def test_bot_not_started():
         pytest.raises(BodyUnreachable, match="bot.js serve"),
     ):
         body.state()
+
+
+def test_setup_sends_the_place_and_the_inventory():
+    sent = {}
+
+    def answer(request):
+        sent.update(path=request.url.path, body=json.loads(request.content))
+        return httpx.Response(200, json={"success": True, "reason": "ok", "details": {}})
+
+    assert fake_body(answer).setup(10, -20, {"dirt": 16})["success"]
+    assert sent == {"path": "/setup", "body": {"x": 10, "z": -20, "inventory": {"dirt": 16}}}

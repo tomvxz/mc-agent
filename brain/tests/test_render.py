@@ -49,3 +49,8 @@ def test_damage_death_and_repeated_failure_are_reported():
 def test_health_change_without_death():
     text = render.render_new_state({**STATE, "health": 12}, previous_state=STATE)
     assert "Health went down: 20 -> 12." in text
+
+
+def test_goal_and_state_messages_end_with_the_next_step_reminder():
+    assert render.render_goal("wood", STATE).endswith(render.NEXT_STEP)
+    assert render.render_new_state(STATE).endswith(render.NEXT_STEP)

@@ -130,6 +130,30 @@ test("POST /execute: malformed requests -> 400", async () => {
   }
 });
 
+test("POST /setup: malformed requests -> 400 (nothing is sent to the server)", async () => {
+  const bot = fakeBot();
+  const sent = [];
+  bot.chat = (text) => sent.push(text);
+  const base = await api(bot);
+  const bad = [
+    "[]",
+    { z: 0 },
+    { x: 1.5, z: 0 },
+    { x: 0, z: 0, inventory: [] },
+    { x: 0, z: 0, inventory: { not_an_item: 1 } },
+    { x: 0, z: 0, inventory: { dirt: 0 } },
+    { x: 0, z: 0, y: 64 },
+  ];
+  for (const body of bad) {
+    const r = await fetch(`${base}/setup`, {
+      method: "POST",
+      body: typeof body === "string" ? body : JSON.stringify(body),
+    });
+    assert.strictEqual(r.status, 400, JSON.stringify(body));
+  }
+  assert.deepStrictEqual(sent, []);
+});
+
 test("POST /execute: one skill at a time -> 409 busy", async () => {
   const bot = fakeBot();
   bot.pathfinder.goto = () => new Promise((r) => setTimeout(r, 300)); // a move that takes a while

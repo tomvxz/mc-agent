@@ -11,7 +11,8 @@ branché sur le VRAI jeu via Mineflayer. Projet d'apprentissage : l'utilisateur 
   (les imports nommés `import { goals } from ...` échouent).
   - `bot.js` : crée le bot ; modes `node --env-file=../.env bot.js serve` (API pour le cerveau),
     `suite <compétence|all> [N]` (arène), `field [N] [graine] [indice]` (banc terrain)
-  - `src/api.js` : l'API HTTP (`GET /state`, `GET /skills`, `GET /run`, `POST /execute`)
+  - `src/api.js` : l'API HTTP (`GET /state`, `GET /skills`, `GET /run`, `POST /execute`, `POST /setup`)
+  - `src/setup.js` : mise en place d'un banc (lieu, inventaire, jour) ; pas une compétence, non journalisée
   - `src/execute.js` : exécute une compétence et écrit sa ligne de journal (`src/logger.js`, `src/run.js` : où et quel run)
   - `src/runSkill.js` : enveloppe (timeout, capture d'erreurs, durée) ; `src/cancel.js` : une compétence arrêtée ne peut plus agir
   - `src/skills/` : une compétence par fichier, regroupées dans `index.js` (`utils.js` = fonctions partagées,
@@ -28,6 +29,9 @@ branché sur le VRAI jeu via Mineflayer. Projet d'apprentissage : l'utilisateur 
 - `brain/` (Python géré par uv, tests : `uv run pytest`) : agent LLM, puis world model supervisé (PyTorch).
   `agent.py` boucle, `llm.py` l'unique appel au LLM, `render.py` TOUS les textes lus par le LLM, `body.py` client HTTP,
   `journal.py` épisodes. Lancer un épisode : `uv run python -m brain.agent "but" --max-turns N`.
+  Le lire : `uv run python -m brain.show [fin de l'id] [--full]` (`show.py`, lecture seule).
+  Banc d'épisodes : `uv run python -m brain.bench [--task T] [--places N] [--seed S]` (`bench.py`) : succès VÉRIFIÉ
+  sur l'état (pas seulement le goal_reached du LLM), tours, réponses inutilisables. Une tâche pour l'instant (oak_logs).
 - `notebooks/explore_body.ipynb` : explorer l'API, le journal, et la boucle avec un faux ou un vrai LLM.
 - Communication corps/cerveau : Node (le corps) expose une petite API HTTP locale ; Python (le cerveau) l'appelle.
   Node peut contenir des logiques de décision (réflexes, choix internes d'une compétence, et plus si c'est utile) ;
@@ -92,6 +96,27 @@ branché sur le VRAI jeu via Mineflayer. Projet d'apprentissage : l'utilisateur 
 - Voyager (Wang et al. 2023) est une inspiration et une baseline, pas à reproduire : il fait écrire du code au LLM
   et n'a pas de modèle appris. Notre différence : primitives écrites à la main + world model entraîné
   (prédiction avant l'action, détection de surprise après).
+
+## Architecture cognitive : chaque connaissance à sa place (décision de conception)
+- But du projet : une architecture pensée, pas un LLM qui force le problème en brut. Le LLM est le composant le plus
+  cher, le plus lent et le moins fiable : il ne reçoit que ce qu'il doit DÉCIDER, le reste est calculé ailleurs.
+- Une connaissance va au composant qui correspond à sa nature :
+  - immédiate, au tick (ne pas tomber, contourner la lave) -> réflexes dans Node ;
+  - répétitive (que faire après `no_path`) -> tactique (`brain/recovery.py`, règles puis appris) ;
+  - régularité statistique (ce que produit une action dans un état) -> world model (appris, incertitude mesurable) ;
+  - fait exact propre à ce monde (où sont le coffre, les arbres, ce qui est exploré) -> mémoire structurée tenue par
+    le cerveau (des DONNÉES, mises à jour à partir des résultats des compétences) ;
+  - but, ordre des étapes, langage -> le LLM.
+- À terme, le prompt est une VUE CONSTRUITE à chaque tour par `render.py` (but, état, faits utiles de la mémoire,
+  prédictions du world model, dernier résultat, une ligne par tour passé), pas une conversation qui s'allonge :
+  contexte borné par construction. Aujourd'hui c'est encore une conversation (suffisant : ~60 tours en 16k).
+- Chaque bloc de la vue = un composant ajouté UN à la fois et mesuré sur le banc d'épisodes (avec/sans).
+- Les correctifs de prompt pour un petit modèle (`NEXT_STEP`, formulation de `goal_reached`, premier essai gratuit)
+  sont des rustines mesurées, pas de l'architecture : à remettre en cause si le modèle ou la forme du prompt change.
+- Pistes plus tard, selon les mesures : historique résumé par le code, récupération d'expériences passées (précurseur
+  des macros), fine-tuning du petit modèle sur des données de COLLECTE (A/B avec le world model). Le prompt caching
+  n'agrandit pas la mémoire : il accélère, à condition de garder le début du prompt stable (rien qui change dans le
+  prompt système).
 
 ## Journal : un format solide (matière première du world model et du futur espace latent)
 - Format exact (champs, versions, exemples) : `docs/journal.md`. Le tenir à jour à chaque changement de version.

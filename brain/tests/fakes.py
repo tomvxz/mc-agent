@@ -53,6 +53,7 @@ class FakeBody:
 
     def __init__(self, execute: Callable[[str, dict[str, Any]], dict[str, Any]], data_dir: str = "/tmp"):
         self.executed: list[dict[str, Any]] = []
+        self.setups: list[dict[str, Any]] = []  # the POST /setup requests
         self.execute = execute
         self.data_dir = data_dir
         self.state = dict(STATE)
@@ -69,6 +70,11 @@ class FakeBody:
             req = json.loads(request.content)
             self.executed.append(req)
             return httpx.Response(200, json=self.execute(req["name"], req["args"]))
+        if path == "/setup":
+            req = json.loads(request.content)
+            self.setups.append(req)
+            self.state = {**self.state, "inventory": dict(req["inventory"])}
+            return httpx.Response(200, json=ok(position=[req["x"] + 0.5, 64, req["z"] + 0.5]))
         return httpx.Response(404, json={"error": "not_found"})
 
     def client(self) -> Body:

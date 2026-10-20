@@ -8,9 +8,8 @@
 // test what we thought of; this bench finds what we did not think of.
 // Everything goes through execute() with source "test:field" (dev data, never for training).
 
-import { runCommand } from "../../src/commands.js";
 import execute from "../../src/execute.js";
-import { sleep, waitUntil } from "../../src/skills/utils.js";
+import { setupPlace } from "../../src/setup.js";
 import { drawLocations, summarize } from "./plan.js";
 
 const NOTHING = ["air", "cave_air", "void_air", "short_grass", "tall_grass", "fern", "large_fern"];
@@ -102,17 +101,8 @@ const TASKS = [
 
 // Send the bot to a location, clean (empty inventory except 16 dirt, day, clear weather)
 async function goToLocation(bot, loc) {
-    const before = bot.entity.position.clone();
-    await runCommand(bot, `/spreadplayers ${loc.x} ${loc.z} 0 1 false ${bot.username}`, 5000);
-    const moved = await waitUntil(() => bot.entity.position.distanceTo(before) > 10, 10000);
-    if (!moved) return false;
-    await Promise.race([bot.waitForChunksToLoad(), sleep(15000)]);
-    await runCommand(bot, `/clear ${bot.username}`);
-    await runCommand(bot, `/give ${bot.username} dirt 16`);
-    await runCommand(bot, "/time set day");
-    await runCommand(bot, "/weather clear");
-    await sleep(2000); // let the terrain and the server settle
-    return true;
+    const r = await setupPlace(bot, { x: loc.x, z: loc.z, inventory: { dirt: 16 } });
+    return r.success;
 }
 
 async function runField(bot, n, seed, only) {

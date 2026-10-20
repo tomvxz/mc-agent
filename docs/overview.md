@@ -40,6 +40,7 @@ On the Python side, `brain/agent.py` is the loop: state -> prompt -> LLM -> plan
 | `src/movements.js` | pathfinder settings: jumps, digs a passage, pillars up, avoids lava and monsters |
 | `src/fixes.js` | fixes for Mineflayer bugs (window clicks, difficulty, freezing against walls) |
 | `src/commands.js` | `runCommand`: send a server command (/tp, /give...) |
+| `src/setup.js` | starting situation for the benches (place, inventory, day): `POST /setup`, field bench |
 | `src/run.js`, `version.js`, `logger.js` | run id, versions, where the journal is written |
 | `src/skills/catalogue.js` | what the LLM reads about each skill: description, parameters, failure reasons |
 | `src/skills/utils.js` | shared helpers (`gotoWatched` = walking with a stuck detector, pickup...) |
@@ -60,7 +61,9 @@ On the Python side, `brain/agent.py` is the loop: state -> prompt -> LLM -> plan
 | `scan`, `eat` | no (for now) | summary of the surroundings, eat |
 
 **brain/** (the mind, Python): `agent.py` loop, `llm.py` the single LLM call (replaceable provider),
-`render.py` every text the LLM reads, `body.py` HTTP client of the body, `journal.py` episode log.
+`render.py` every text the LLM reads, `body.py` HTTP client of the body, `journal.py` episode log,
+`show.py` an episode in a readable way (`uv run python -m brain.show [id] [--full]`),
+`bench.py` the episode bench (`uv run python -m brain.bench [--places N] [--seed S]`).
 
 **Tests**
 | Where | What | Command (from `bot/`) |
@@ -69,6 +72,7 @@ On the Python side, `brain/agent.py` is the loop: state -> prompt -> LLM -> plan
 | `bot/tests/game/` | in a reproducible arena, one skill at a time | `node --env-file=../.env bot.js suite <skill> [N]` |
 | `bot/tests/field/` | random natural places, success rate and failure reasons | `node --env-file=../.env bot.js field [N] [seed] [only]` |
 | `brain/tests/` | Python, without the body | `uv run pytest` (from the repo root) |
+| `brain/bench.py` | the LLM agent on a task in random places: success checked on the state | `uv run python -m brain.bench` (bot in `serve` mode) |
 
 ## Data
 `data/dev/` (development, disposable, never for training): `runs.jsonl` (one line per launch),

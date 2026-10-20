@@ -47,7 +47,7 @@ bot.once("spawn", async () => {
         const apiPort = parseInt(process.env.API_PORT || "3000", 10);
         await startApi(bot, { port: apiPort });
         console.log(
-            `[api] ready on http://127.0.0.1:${apiPort} (GET /state, GET /skills, GET /run, POST /execute)`,
+            `[api] ready on http://127.0.0.1:${apiPort} (GET /state, GET /skills, GET /run, POST /execute, POST /setup)`,
         );
         // If the bot is disconnected the API is useless: exit so the brain notices
         bot.on("end", () => process.exit(1));

@@ -34,6 +34,17 @@ Rules:
 - When the goal is reached, call goal_reached.
 - If no skill can do what you need, call missing_capability and say what you would need."""
 
+# Ends every goal and state message. A small model follows the LAST message much more than the
+# system prompt: without this line it called one skill per answer, even with three positions to
+# collect (measured: 1 call in 3/3 tries; with it, 3 calls in 10/10, and still find alone at the
+# first turn, no invented coordinates). "call the tool goal_reached": with "or goal_reached." it
+# wrote "goal_reached()" as text instead of calling the tool (5/5 on a real episode's turn).
+NEXT_STEP = (
+    "Next: call all the skills you can already decide (several calls in one answer). "
+    "If the goal is reached, call the tool goal_reached."
+)
+
+
 # --- Small helpers ----------------------------------------------------------------------------
 
 
@@ -182,7 +193,7 @@ def render_state(state: dict[str, Any] | None) -> str:
 
 def render_goal(goal: str, state: dict[str, Any] | None) -> str:
     """The first user message of an episode."""
-    return f"Goal: {goal}\n\n{render_state(state)}"
+    return f"Goal: {goal}\n\n{render_state(state)}\n\n{NEXT_STEP}"
 
 
 def _body_events(result: dict[str, Any]) -> str:
@@ -267,6 +278,8 @@ def render_new_state(
     lines += _what_changed(previous_state, state)
     lines.append("New state:")
     lines.append(render_state(state))
+    lines.append("")
+    lines.append(NEXT_STEP)
     return "\n".join(lines)
 
 
