@@ -1,10 +1,12 @@
 import break_block from "./break_block.js";
+import collect_block from "./collect_block.js";
 import craft from "./craft.js";
 import eat from "./eat.js";
 import explore from "./explore.js";
 import find from "./find.js";
 import mine from "./mine.js";
 import move_to from "./move_to.js";
+import pick_up from "./pick_up.js";
 import place_block from "./place_block.js";
 import scan from "./scan.js";
 
@@ -14,6 +16,7 @@ export default {
   move_to,
   break_block,
   place_block,
+  pick_up,
   craft,
   eat,
   // Questions (change nothing in the world)
@@ -22,5 +25,6 @@ export default {
   // Moving to discover new places
   explore,
   // Shortcuts (assemblies of primitives)
+  collect_block,
   mine,
 };

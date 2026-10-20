@@ -35,7 +35,8 @@ branché sur le VRAI jeu via Mineflayer. Projet d'apprentissage : l'utilisateur 
 - Le journal est la matière première du world model : ne jamais le modifier à la main ni filtrer les échecs.
 - Un seul format d'état : `observe`. Le LLM ne le lit pas brut : le cerveau en fabrique un texte court pour le prompt
   (une présentation, pas un second format). Tout champ ajouté doit rester optionnel pour les anciennes lignes.
-- Changer le COMPORTEMENT d'une compétence = augmenter sa `version` dans `catalogue.js` (les lignes la notent).
+- Pas de numéros de version écrits à la main (ni par compétence, ni pour le catalogue) : le commit git identifie le code.
+  Une collecte (`MC_DATA_PURPOSE=collection`) refuse de démarrer si le code n'est pas commité.
 - Ne jamais accélérer le serveur (`/tick rate`) pour collecter : Mineflayer reste en temps réel, les données seraient faussées.
 - Commandes serveur envoyées par notre code : toujours via `src/commands.js` (`runCommand`).
 - Format du journal GELÉ jusqu'à l'étape 7 : pas de nouveau champ. On garde ce qui aide à comprendre une compétence maintenant.
@@ -45,9 +46,9 @@ branché sur le VRAI jeu via Mineflayer. Projet d'apprentissage : l'utilisateur 
 - Le LLM COMPOSE : il enchaîne des compétences pour atteindre un but. Ne pas écrire une compétence par objectif.
 - Deux niveaux :
   - Primitives générales et indépendantes, paramétrées par coordonnées ou cible :
-    `move_to(x,y,z)`, `break_block(x,y,z)`, `place_block(item,x,y,z)`, `use_item(item,cible)`,
+    `move_to(x,y,z)`, `break_block(x,y,z)` (casse seulement), `pick_up(item)` (ramasse), `place_block(item,x,y,z)`, `use_item(item,cible)`,
     `attack(entité)`, `container(position,action,item,quantité)`, `craft`, `smelt`, `equip`, `eat`, `wait`.
-  - Raccourcis (macros) pour l'efficacité : `mine(block,count)` (fait). `flee` = `find(hostile)` + `move_to` : pas de raccourci pour l'instant.
+  - Raccourcis (macros) pour l'efficacité : `collect_block(x,y,z)` = break_block + pick_up, `mine(block,count)` = find + collect_block répétés. `flee` = `find(hostile)` + `move_to` : pas de raccourci pour l'instant.
     Un raccourci est un assemblage de primitives (ex. mine = find + move_to + break_block), pas un code à part.
 - Compétences "questions" (sans effet sur le monde) : `find(bloc|entité)` et `scan`, pour que le LLM sache où sont les ressources.
 - Toujours avoir `explore(direction, distance)` : sinon `block_not_found` bloque le LLM.
@@ -80,7 +81,7 @@ branché sur le VRAI jeu via Mineflayer. Projet d'apprentissage : l'utilisateur 
 - Chaque ligne porte un `schema_version` ; changer le format = nouvelle version, pas de réécriture des anciennes lignes.
 - Les transitions d'un épisode LLM portent l'`episode_id` et le numéro d'étape, pour relier plan et résultats.
 - Garder la réponse brute du LLM (pas seulement le plan interprété) : elle servira à entraîner le lien LLM <-> world model.
-- Noter dans chaque épisode le modèle utilisé (nom, version) et la version du catalogue de compétences.
+- Noter dans chaque épisode le modèle utilisé (nom, version) et la version du code (commit git).
 
 ## World model
 - Supervisé (pas du RL) : (état, compétence) -> succès, durée, danger, delta d'inventaire. Ensemble de MLP, l'incertitude vient du désaccord.

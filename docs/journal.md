@@ -60,8 +60,6 @@ Written once per run, right after the bot spawns: the run's fixed facts, not rep
   "world_seed": "-1234567890",              // from /seed (null if unavailable)
   "versions": {
     "code": "6fc30a3+dirty",                // git commit; "+dirty" = uncommitted changes in bot/ or brain/
-    "catalogue": 2,                         // what the LLM is shown (bot/src/skills/catalogue.js)
-    "skills": { "mine": 1, "move_to": 1, … },   // implementation version of each skill
     "minecraft": "1.21.11", "server": "This server is running Paper version …",
     "mineflayer": "4.39.0", "pathfinder": "2.4.5", "node": "v26.5.0" },
   "game": { "difficulty": "hard",            // the WORLD's difficulty (can differ from server.properties)
@@ -194,7 +192,7 @@ since the start of the skill.
 | Field | Computed from |
 |---|---|
 | transition id, previous transition | `run_id` + `seq` |
-| versions (code, catalogue, skill), world, bot, seed, tick rate at start | `runs.jsonl` via `run_id` |
+| code version (git commit), world, bot, seed, tick rate at start | `runs.jsonl` via `run_id` |
 | step within an episode | order of `seq` among lines with the same `episode_id` |
 | items gained / lost, health / food change | `next_state` - `state` |
 | ticks used | `tick_end - tick_start` |
@@ -217,23 +215,14 @@ v3: `state`/`next_state` were a small observe + `state_raw`/`next_state_raw`, pl
 run-level fields on every line, `events` instead of `trace`. v2: no trace, context, times or
 reliability fields. v1: the first format. All are development data: ignore them for training.
 
-## Version history of the catalogue and the skills
-Every line records them (runs.jsonl `versions`), so data from different implementations can be told apart.
-
-**Catalogue** (what the LLM reads): v2 descriptions translated to English; v3 craft failure reasons
-mention `details.ingredients`; v4 `move_to` reason `target_blocked`; v5 reason `stuck`; v6 `mine` and
-`break_block` say when to use them, `target_blocked` points to them; v7 only `SHOWN_TO_LLM` is served
-by `GET /skills` (move_to, find, mine, craft, place_block, explore), texts no longer point to hidden skills.
-
-**Skills** (behavior):
-- `move_to`: v2 `target_blocked`; v3 stuck detector; v4 jumping in place is not progress; v5 fixWallContact.
-- `break_block`: v2-v4 clears leaves hiding the target; v5 general rule (approach, break quick blocks,
-  else change viewpoint); v6 sight checked on block faces; v7 fixWallContact; v8 viewpoint first,
-  breaks quick blocks (hardness <= 0.25) only when no viewpoint exists.
-- `place_block`, `explore`: v2 stuck detector; v3 jumping in place is not progress; v4 fixWallContact.
-- `craft`: v2 details say what the recipe needs; v3 walks with the stuck detector; v4 fixWallContact.
-- `mine`: v2 tries another block when stuck; v3-v8 follows `break_block`.
-- `eat`, `find`, `scan`: v1.
+## Which code produced the data
+The git commit (`versions.code` in runs.jsonl, `code_version` in episodes) identifies the skills, the
+catalogue texts and everything else exactly; `git diff` between two commits tells what changed.
+There are no hand-written version numbers per skill or for the catalogue (they could lie: a fix in
+a shared file changes every skill). Hence: a **collection** run refuses to start if the code is not
+committed (`+dirty`). Development runs accept anything (their data is never used for training).
+Before October 20, 2026, lines also had `versions.catalogue`, `versions.skills` and
+`catalogue_version` (development data only).
 
 ## `episodes.jsonl`
 
@@ -256,8 +245,7 @@ program crashes mid-episode). Every event has:
   "goal": "craft a wooden pickaxe",
   "scenario": "arena:trees_3",                // optional: the task setting
   "model": { "provider": "ollama", "name": "qwen3:8b", "params": { "temperature": 0.2, "seed": 42 } },
-  "catalogue_version": 2,
-  "code_version": "6fc30a3",
+  "code_version": "6fc30a3",                  // the git commit (+dirty if uncommitted changes)
   "prompt_version": 1,                        // version of brain/render.py (the texts the LLM reads)
   "system_prompt": "…",                       // sent once: it does not change during the episode
   "tools": [ … ],                             // tool definitions sent to the LLM (propose_plans)

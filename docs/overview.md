@@ -21,8 +21,8 @@ When the brain asks `mine(oak_log, 3)`:
 1. `bot/src/api.js`: receives `POST /execute`, checks the request, one skill at a time.
 2. `bot/src/execute.js`: state before (`observe`), runs the skill while recording a trace, state after, writes one line.
 3. `bot/src/runSkill.js`: 60 s time limit, catches errors, really stops a timed-out skill (`cancel.js`).
-4. `bot/src/skills/mine.js`: repeats `find` + `break_block` until 3 logs are collected.
-5. `bot/src/skills/break_block.js`: gets a viewpoint, digs, picks up the item.
+4. `bot/src/skills/mine.js`: repeats `find` + `collect_block` until 3 logs are collected.
+5. `bot/src/skills/collect_block.js`: `break_block` (gets a viewpoint, digs) then `pick_up` (walks onto the items).
 
 On the Python side, `brain/agent.py` is the loop: state -> prompt -> LLM -> plan -> execute -> results -> again.
 
@@ -41,7 +41,7 @@ On the Python side, `brain/agent.py` is the loop: state -> prompt -> LLM -> plan
 | `src/fixes.js` | fixes for Mineflayer bugs (window clicks, difficulty, freezing against walls) |
 | `src/commands.js` | `runCommand`: send a server command (/tp, /give...) |
 | `src/run.js`, `version.js`, `logger.js` | run id, versions, where the journal is written |
-| `src/skills/catalogue.js` | what the LLM reads about each skill: description, parameters, failure reasons, versions |
+| `src/skills/catalogue.js` | what the LLM reads about each skill: description, parameters, failure reasons |
 | `src/skills/utils.js` | shared helpers (`gotoWatched` = walking with a stuck detector, pickup...) |
 | `src/skills/*.js` | one skill per file (see below) |
 
@@ -50,11 +50,13 @@ On the Python side, `brain/agent.py` is the loop: state -> prompt -> LLM -> plan
 |---|---|---|
 | `move_to(x, y, z, range)` | yes | walk somewhere (the bot handles obstacles itself) |
 | `find(target)` | yes | where are the nearest blocks or entities of a type |
-| `mine(block, count)` | yes | gather blocks: find + break_block, repeated |
+| `collect_block(x, y, z)` | yes | break one block AND pick up what drops (break_block + pick_up) |
+| `mine(block, count)` | yes | gather blocks of a type: find + collect_block, repeated |
 | `craft(item, count)` | yes | craft an item (needs a crafting table nearby for most recipes) |
 | `place_block(item, x, y, z)` | yes | place a block from the inventory |
 | `explore(direction, distance)` | yes | go somewhere new when nothing is found |
-| `break_block(x, y, z)` | no (for now) | break one block and pick up what drops |
+| `break_block(x, y, z)` | no (for now) | break one block, only that (reports what fell) |
+| `pick_up(item?, max_distance)` | no (for now) | pick up items lying on the ground nearby |
 | `scan`, `eat` | no (for now) | summary of the surroundings, eat |
 
 **brain/** (the mind, Python): `agent.py` loop, `llm.py` the single LLM call (replaceable provider),

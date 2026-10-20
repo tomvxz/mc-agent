@@ -1,5 +1,5 @@
-const { isHostile } = require("../state");
-const { round1 } = require("./utils");
+import { isHostile } from "../state.js";
+import { round1 } from "./utils.js";
 
 // Question (changes nothing in the world): where are the blocks or entities of a given type?
 // target: a block name ("oak_log"), an entity name ("cow") or "hostile" (every monster).
@@ -78,4 +78,4 @@ async function find(bot, { target, count = 5, max_distance = 64 } = {}) {
   };
 }
 
-module.exports = find;
+export default find;
