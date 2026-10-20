@@ -75,7 +75,10 @@ branché sur le VRAI jeu via Mineflayer. Projet d'apprentissage : l'utilisateur 
   Une tâche inexprimable = il manque une primitive.
 
 ## LLM et boucle de décision
-- L'outil `propose_plans` du LLM contient un champ optionnel `missing_capability` (ce dont il aurait eu besoin).
+- Chaque compétence est un OUTIL déclaré au LLM ; les appels d'une réponse, dans l'ordre, forment le plan.
+  Deux outils en plus : `goal_reached` et `missing_capability` (ce dont il aurait eu besoin).
+  (Avant : un seul outil `propose_plans` contenant une liste de compétences ; qwen2.5:3b appelait les compétences
+  directement, Ollama jetait ces appels à des outils inconnus -> réponses vides.)
   Le journaliser ; ajouter des primitives selon la fréquence de ces demandes, pas par intuition.
   Limite constatée : `qwen2.5:3b` l'a laissé vide dans TOUS les épisodes, même bloqué. Un petit modèle dit mal ce qui
   lui manque : le signal sera faible. Pour mesurer les manques, prévoir un modèle plus gros ponctuellement, ou une
@@ -122,7 +125,7 @@ branché sur le VRAI jeu via Mineflayer. Projet d'apprentissage : l'utilisateur 
 - LLM : petit modèle ouvert en local (cible : RTX 4090, quand le PC est disponible). Voix a terme dans un deuxieme temps
   L'appel au LLM passe par UNE seule fonction remplaçable (fournisseur interchangeable : API pendant le dev, local ensuite).
   Actuellement : Ollama + `qwen2.5:3b` sur Mac M2 16 Go (API compatible OpenAI, `LLM_MODEL`, `LLM_BASE_URL`).
-  Pas de RAG, LangChain ni LangGraph. Sortie du LLM non contrainte pour l'instant (outil + JSON de secours).
+  Pas de RAG, LangChain ni LangGraph. Sortie du LLM non contrainte pour l'instant (outils + JSON de secours dans le texte).
 
 ## Feuille de route (mise à jour)
 5. Compétences : primitives générales d'abord, puis raccourcis, puis questions et exploration.

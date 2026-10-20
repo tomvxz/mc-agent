@@ -286,7 +286,7 @@ const CATALOGUE = {
     kind: "shortcut",
     description:
       "Use it to collect one specific block whose position you know (from find): it breaks the block " +
-      "and picks up what drops (break_block + pick_up). No need to move_to first. " +
+      "and picks up what drops. No need to move_to first. " +
       "details.collected tells what reached the inventory (may be empty: leaves or glass drop nothing).",
     parameters: {
       type: "object",

@@ -13,25 +13,26 @@ latent space can replace it later without changing the agent loop.
 
 from typing import Any
 
-SYSTEM_PROMPT = """You control a Minecraft bot through skills. You reach goals by chaining skills.
+from brain.llm import GOAL_REACHED, MISSING_CAPABILITY
+
+SYSTEM_PROMPT = """You control a Minecraft bot. Each skill is a tool: you reach goals by chaining skills.
 
 Rules:
-- Answer ONLY by calling the tool propose_plans (or, if you cannot call tools, with its JSON:
-  {{"plan": [{{"skill": "...", "args": {{...}}}}], "missing_capability": "", "done": false}}).
-- A plan is a list of skill calls run in order. It stops at the first failure, and you then get
-  the results and the new state to fix your plan.
+- Answer by calling skills. You can call several in one answer: they run in that order and stop
+  at the first failure. You then get the result of each call and the new state. For example,
+  after find gave three positions, call collect_block three times in the same answer.
+- The result of a skill only arrives after your answer has run: never write coordinates you have
+  not seen yet. For example, call find, and use the positions it gives at your next answer.
 - Coordinates are absolute block coordinates (x, y, z). North is -z, south +z, east +x, west -x.
   y is the height.
-- Before acting on something you have not located, use find. If find answers not_found,
-  use explore, then search again.
-- To get blocks (wood, stone...), use mine; for one block at a known position, collect_block.
-- Do not repeat a call that just failed in the same way: read its reason and change the plan.
-- When the goal is reached, answer with an empty plan and done=true.
-- If no skill can do what you need, say what in missing_capability.
-
-Skills:
-{skills}"""
-
+- To get blocks of a type (wood, stone...), use mine(block, count): it finds them itself (no find
+  needed before), walks there, breaks them and picks up the items on its own. collect_block is only
+  for one block whose exact position you have already seen.
+- For anything else you have not located yet, use find. If find answers not_found (or mine
+  answers block_not_found), use explore, then try again.
+- Do not repeat a call that just failed in the same way: read its reason and change your calls.
+- When the goal is reached, call goal_reached.
+- If no skill can do what you need, call missing_capability and say what you would need."""
 
 # --- Small helpers ----------------------------------------------------------------------------
 
@@ -61,42 +62,67 @@ def _time_of_day(ticks: int | None) -> str:
     return "dawn"
 
 
-def _args_signature(entry: dict[str, Any]) -> str:
-    """e.g. "block, count=1" from a skill's JSON Schema parameters.
-
-    Allowed values are shown when the schema has them (seen with v1: the LLM wrote "southwest"
-    because it did not know the directions were north_east, south_west...).
-    """
-    props = entry["parameters"]["properties"]
-    required = entry["parameters"].get("required", [])
-    parts = []
-    for name, schema in props.items():
-        if name in required:
-            part = name
-        elif "default" in schema:
-            part = f"{name}={schema['default']}"
-        else:
-            part = f"{name}?"
-        if "enum" in schema:
-            part += f" (one of: {', '.join(map(str, schema['enum']))})"
-        parts.append(part)
-    return ", ".join(parts)
-
-
 # --- What the LLM reads -----------------------------------------------------------------------
 
 
-def render_skills(catalogue: dict[str, Any]) -> str:
-    """The skill list for the system prompt: signature, description, failure reasons."""
-    lines = []
-    for name, entry in catalogue["skills"].items():
-        lines.append(f"- {name}({_args_signature(entry)}): {entry['description']}")
-        lines.append(f"  Can fail with: {', '.join(entry['reasons'])}.")
-    return "\n".join(lines)
+def _tool(name: str, description: str, parameters: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "type": "function",
+        "function": {"name": name, "description": description, "parameters": parameters},
+    }
 
 
-def system_prompt(catalogue: dict[str, Any]) -> str:
-    return SYSTEM_PROMPT.format(skills=render_skills(catalogue))
+def _with_defaults(parameters: dict[str, Any]) -> dict[str, Any]:
+    """Defaults written into the descriptions: Ollama only passes type, description and enum of
+    each parameter to the model, so a "default" field would never be seen."""
+    properties = {}
+    for name, schema in parameters.get("properties", {}).items():
+        schema = dict(schema)
+        if "default" in schema:
+            text = schema.get("description", "")
+            schema["description"] = f"{text} (default {schema.pop('default')})".strip()
+        properties[name] = schema
+    return {**parameters, "properties": properties}
+
+
+def skill_tools(catalogue: dict[str, Any]) -> list[dict[str, Any]]:
+    """The tools declared to the LLM: one per skill, then goal_reached and missing_capability."""
+    tools = [
+        _tool(
+            name,
+            f"{entry['description']} Can fail with: {', '.join(entry['reasons'])}.",
+            _with_defaults(entry["parameters"]),
+        )
+        for name, entry in catalogue["skills"].items()
+    ]
+    tools.append(
+        _tool(
+            GOAL_REACHED,
+            "Call it when the goal is reached (alone, or after the skills that finish the goal).",
+            {"type": "object", "properties": {}},
+        )
+    )
+    tools.append(
+        _tool(
+            MISSING_CAPABILITY,
+            "Call it when no skill can do what you need, to say what skill would have helped.",
+            {
+                "type": "object",
+                "properties": {
+                    "description": {
+                        "type": "string",
+                        "description": "the capability you would need",
+                    }
+                },
+                "required": ["description"],
+            },
+        )
+    )
+    return tools
+
+
+def system_prompt() -> str:
+    return SYSTEM_PROMPT
 
 
 def render_state(state: dict[str, Any] | None) -> str:
@@ -192,52 +218,63 @@ def _what_changed(
     return lines
 
 
-def render_results(
-    results: list[dict[str, Any]],
-    catalogue: dict[str, Any],
+def render_result(step: dict[str, Any], catalogue: dict[str, Any]) -> str:
+    """What one skill call gave (the answer to its tool call).
+
+    step: {"skill", "args", "result": {success, reason, details, body_events}}."""
+    r = step["result"]
+    call = f"{step['skill']}({', '.join(f'{k}={v!r}' for k, v in step['args'].items())})"
+    if r["success"]:
+        return f"{call}: ok {r.get('details') or ''}".rstrip() + _body_events(r)
+    reasons = catalogue["skills"].get(step["skill"], {}).get("reasons", {})
+    meaning = reasons.get(r["reason"]) or catalogue.get("common_reasons", {}).get(
+        r["reason"], ""
+    )
+    return (
+        f"{call}: FAILED, reason {r['reason']} ({meaning}). details: {r.get('details')}"
+        + _body_events(r)
+    )
+
+
+def render_not_run() -> str:
+    """The answer to a skill call that was not run."""
+    return "not run: an earlier call failed (or too many calls in one answer)"
+
+
+def render_noted(name: str, plan_succeeded: bool) -> str:
+    """The answer to a goal_reached or missing_capability call."""
+    if name == GOAL_REACHED and not plan_succeeded:
+        return "not accepted: a skill failed, so the goal is not reached yet"
+    return "noted"
+
+
+def render_new_state(
     state: dict[str, Any] | None,
     previous_state: dict[str, Any] | None = None,
     repeated_failure: bool = False,
 ) -> str:
-    """What happened when the plan ran, then the new state.
+    """After the answers to the calls: warnings, then the new state.
 
-    results: [{"skill", "args", "result": {success, reason, details, body_events}}], in order.
     previous_state: the state shown at the previous turn (to report deaths and health changes).
     repeated_failure: the last failure is exactly the same as at the previous turn.
     """
-    lines = ["Results of your plan:"]
-    for i, step in enumerate(results, 1):
-        r = step["result"]
-        call = f"{step['skill']}({', '.join(f'{k}={v!r}' for k, v in step['args'].items())})"
-        if r["success"]:
-            lines.append(
-                f"{i}. {call}: ok {r.get('details') or ''}".rstrip() + _body_events(r)
-            )
-        else:
-            reasons = catalogue["skills"].get(step["skill"], {}).get("reasons", {})
-            meaning = reasons.get(r["reason"]) or catalogue.get(
-                "common_reasons", {}
-            ).get(r["reason"], "")
-            lines.append(
-                f"{i}. {call}: FAILED, reason {r['reason']} ({meaning}). details: {r.get('details')}"
-                + _body_events(r)
-            )
+    lines = []
     if repeated_failure:
         lines.append(
             "You already tried exactly this at the previous turn and it failed the same way. "
-            "Do not repeat it: read the reason and the details, and change your plan."
+            "Do not repeat it: read the reason and the details, and change your calls."
         )
     lines += _what_changed(previous_state, state)
-    lines.append("")
+    lines.append("New state:")
     lines.append(render_state(state))
     return "\n".join(lines)
 
 
 def render_empty_plan() -> str:
-    """Sent back when the plan is empty but the goal is not reached (done=false)."""
+    """Sent back when the answer called no skill and not goal_reached: nothing was run."""
     return (
-        "Your plan is empty but done is false: nothing was run. "
-        "Propose at least one skill call, or set done=true if the goal is already reached."
+        "You called no skill: nothing was run. Call at least one skill, "
+        "or goal_reached if the goal is already reached."
     )
 
 
@@ -245,5 +282,5 @@ def render_parse_error(error: str) -> str:
     """Sent back when the answer could not be used."""
     return (
         f"Your answer could not be used: {error}. "
-        "Answer only by calling the tool propose_plans with a plan (a list of skill calls)."
+        "Answer by calling the skills as tools. If the goal is reached, call the tool goal_reached."
     )

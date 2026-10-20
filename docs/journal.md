@@ -247,7 +247,7 @@ program crashes mid-episode). Every event has:
   "model": { "provider": "ollama", "name": "qwen3:8b", "params": { "temperature": 0.2, "seed": 42 } },
   "code_version": "6fc30a3",                  // the git commit (+dirty if uncommitted changes)
   "system_prompt": "…",                       // sent once: it does not change during the episode
-  "tools": [ … ],                             // tool definitions sent to the LLM (propose_plans)
+  "tools": [ … ],                             // tool definitions sent to the LLM: one per skill + goal_reached, missing_capability
   "max_turns": 10 }
 ```
 
@@ -256,11 +256,13 @@ program crashes mid-episode). Every event has:
 { "schema_version": 1, "type": "llm_turn", "episode_id": "ep-…", "seq": 1, "ts": "…",
   "turn": 0,
   "new_messages": [ … ],        // only the messages ADDED to the conversation since the previous turn
-                                //   (includes the rendering of the state the LLM was shown)
+                                //   (the answer of the previous turn, one "tool" message per call
+                                //   with its result, then the new state)
   "raw_response": { … },        // the provider's response, unmodified
-  "plan": [ { "skill": "mine", "args": { "block": "oak_log", "count": 3 } } ],   // null if unparseable
-  "missing_capability": null,   // what the LLM said it lacked, if anything
-  "done": false,                // the LLM thinks the goal is reached
+  "plan": [ { "skill": "mine", "args": { "block": "oak_log", "count": 3 } } ],   // the skill calls of the
+                                //   answer, in order; null if unparseable
+  "missing_capability": null,   // what the LLM said it lacked (its missing_capability call), if anything
+  "done": false,                // the LLM called goal_reached
   "parse_error": null,          // why the answer could not be used (text instead of a tool call...)
   "latency": 2.4,               // seconds spent waiting for the LLM
   "tokens": { "prompt": 1830, "completion": 95 } }   // null if the provider does not say

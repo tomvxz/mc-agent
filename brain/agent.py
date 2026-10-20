@@ -1,7 +1,8 @@
 """The agent loop (step 6: the LLM alone, the baseline of step 8).
 
-    goal -> [LLM proposes a plan -> run it skill by skill, stop at the first failure
-             -> show the results and the new state to the LLM] -> ... until done or max_turns
+    goal -> [LLM calls skills (tools) -> run them in order, stop at the first failure
+             -> answer each call with its result, then show the new state] -> ... until
+             goal_reached or max_turns
 
 The loop only handles PLANS (lists of skill calls) and RESULTS. How they are turned into text
 (render.py) and how the LLM is called (llm.py) are separate, so that later:
@@ -19,7 +20,7 @@ from typing import Any, Callable
 from brain import render
 from brain.body import Body, BodyError
 from brain.journal import EpisodeLog
-from brain.llm import LLMError, LLMReply, OpenAICompatibleLLM, propose_plans_tool
+from brain.llm import GOAL_REACHED, MISSING_CAPABILITY, LLMError, LLMReply, OpenAICompatibleLLM
 
 MAX_STEPS_PER_PLAN = 10  # a longer plan is cut (the LLM sees the results and continues)
 
@@ -41,8 +42,8 @@ def run_episode(
     """
     run = body.run()
     catalogue = body.skills()
-    tools = [propose_plans_tool(list(catalogue["skills"]))]
-    system = render.system_prompt(catalogue)
+    tools = render.skill_tools(catalogue)
+    system = render.system_prompt()
     path = episodes_file or pathlib.Path(run["data_dir"]) / "episodes.jsonl"
 
     skill_calls = 0
@@ -90,8 +91,10 @@ def run_episode(
         ]  # what was added since the previous LLM call (recorded per turn)
         shown_state = start_state  # the state shown to the LLM at the previous turn
         last_failure = None  # (skill, args, reason) of the previous turn's failure
+        counted = 0  # turns counted against max_turns (a first empty answer is not counted)
+        free_retry_used = False  # the previous answer was empty and asked again for free
 
-        for _ in range(max_turns):
+        while counted < max_turns:
             # 1. Ask the LLM
             try:
                 reply = llm(messages, tools)
@@ -111,6 +114,17 @@ def run_episode(
             messages.append(answer)
             new_messages = [answer]
 
+            # An EMPTY answer (no text, no usable tool call) does not use a turn, once in a row.
+            # Seen with qwen2.5:3b + Ollama when skills were not tools: the model called a skill
+            # anyway, Ollama did not know this tool and dropped the whole answer. It is still
+            # logged above, like every LLM call.
+            empty = reply.parse_error is not None and not reply.text
+            if empty and not free_retry_used:
+                free_retry_used = True
+            else:
+                free_retry_used = False
+                counted += 1
+
             # 2. An unusable answer: explain why and ask again
             if reply.parse_error:
                 feedback = {
@@ -121,16 +135,18 @@ def run_episode(
                 new_messages.append(feedback)
                 continue
 
-            # 3. Nothing to do: the LLM says the goal is reached (or forgot to plan anything)
+            # 3. Nothing to run: the LLM says the goal is reached (or only said what it misses)
             plan = (
                 reply.plan or []
             )  # never None here: a None plan comes with a parse_error
             if reply.done and not plan:
                 return finish(True, "done")
             if not plan:
-                feedback = {"role": "user", "content": render.render_empty_plan()}
-                messages.append(feedback)
-                new_messages.append(feedback)
+                feedback = answers(reply, [], catalogue) + [
+                    {"role": "user", "content": render.render_empty_plan()}
+                ]
+                messages += feedback
+                new_messages += feedback
                 continue
 
             # 4. Run the plan, skill by skill, stop at the first failure
@@ -167,19 +183,35 @@ def run_episode(
             )
             repeated = failure is not None and failure == last_failure
             last_failure = failure
-            text = render.render_results(
-                results,
-                catalogue,
-                state,
-                previous_state=shown_state,
-                repeated_failure=repeated,
+            text = render.render_new_state(
+                state, previous_state=shown_state, repeated_failure=repeated
             )
             shown_state = state
-            feedback = {"role": "user", "content": text}
-            messages.append(feedback)
-            new_messages.append(feedback)
+            feedback = answers(reply, results, catalogue) + [
+                {"role": "user", "content": text}
+            ]
+            messages += feedback
+            new_messages += feedback
 
         return finish(False, "max_turns")
+
+
+def answers(
+    reply: LLMReply, results: list[dict[str, Any]], catalogue: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """One "tool" message per call of the answer, in order (the chat API expects an answer to
+    every tool call): the skill's result, "not run", or "noted" for the two other tools."""
+    plan_succeeded = all(r["result"]["success"] for r in results)
+    remaining = iter(results)  # the results are in the order of the skill calls
+    messages = []
+    for call in reply.calls:
+        if call["name"] in (GOAL_REACHED, MISSING_CAPABILITY):
+            text = render.render_noted(call["name"], plan_succeeded)
+        else:
+            step = next(remaining, None)
+            text = render.render_result(step, catalogue) if step else render.render_not_run()
+        messages.append({"role": "tool", "tool_call_id": call["id"], "content": text})
+    return messages
 
 
 def main() -> None:

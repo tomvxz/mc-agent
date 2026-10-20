@@ -12,9 +12,15 @@ configured by environment variables:
     LLM_TEMPERATURE  default 0.2
     LLM_SEED         default 42
 
-Small models often answer with text instead of calling the tool: a plan written as JSON in the
-text is accepted too (parse_mode "text_json"). Anything else gives a parse_error, which the agent
-sends back to the LLM.
+EACH SKILL IS A TOOL (render.skill_tools), plus two tools that are not skills: goal_reached and
+missing_capability. The tool calls of one answer, in order, are the plan.
+(Before: a single tool propose_plans holding a list of skills. qwen2.5:3b called the skills
+directly instead, and Ollama dropped these calls to unknown tools: empty answers.)
+
+Small models sometimes write their calls as text instead: a JSON object in the text is accepted
+too (parse_mode "text_json"): a call {"name": ..., "arguments": {...}} or a plan
+{"plan": [{"skill": ..., "args": {...}}], "missing_capability": ..., "done": ...}.
+Anything else gives a parse_error, which the agent sends back to the LLM.
 
 The text/JSON exchange is a temporary interface: the agent loop only handles plans and results,
 so a later world model (or a shared latent space) can replace this file and render.py without
@@ -23,14 +29,18 @@ touching the loop.
 
 import json
 import os
+import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
 
-TOOL_NAME = "propose_plans"
+# The two tools that are not skills
+GOAL_REACHED = "goal_reached"
+MISSING_CAPABILITY = "missing_capability"
 REQUEST_TIMEOUT = 300.0  # a small local model can be slow on a laptop
+CONTEXT_WARNING = 0.9  # warn when the prompt fills this share of the LLM's context
 
 
 class LLMError(Exception):
@@ -46,97 +56,81 @@ class LLMReply:
     missing_capability: str | None = None
     done: bool = False
     parse_error: str | None = None  # why the answer could not be used
-    parse_mode: str | None = None  # "tool_call" or "text_json"
+    parse_mode: str | None = None  # "tool_calls" or "text_json"
     text: str | None = None  # the text part of the answer, if any
     latency: float | None = None  # seconds
     tokens: dict[str, int | None] | None = (
         None  # {"prompt": ..., "completion": ...}, None if unknown
     )
+    # Every call of the answer, in order, skills and the two other tools: [{"id", "name", "args"}]
+    calls: list[dict[str, Any]] = field(default_factory=list)
 
     def history_message(self) -> dict[str, Any]:
-        """The assistant message to put back in the conversation for the next turn."""
-        if self.plan is not None:
-            content = json.dumps(
+        """The assistant message to put back in the conversation for the next turn.
+
+        A usable answer is put back as tool calls, even when it came as text: the LLM then sees
+        its previous answers in the right format (it imitates what it sees). The raw answer stays
+        in the episode (raw_response)."""
+        if self.parse_error is not None:
+            return {"role": "assistant", "content": self.text or ""}
+        return {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
                 {
-                    "plan": self.plan,
-                    "missing_capability": self.missing_capability,
-                    "done": self.done,
+                    "id": c["id"],
+                    "type": "function",
+                    "function": {"name": c["name"], "arguments": json.dumps(c["args"])},
                 }
-            )
-        else:
-            content = self.text or ""
-        return {"role": "assistant", "content": content}
-
-
-def propose_plans_tool(skill_names: list[str]) -> dict[str, Any]:
-    """The tool the LLM must call (OpenAI "function" format). Skill names come from the catalogue."""
-    return {
-        "type": "function",
-        "function": {
-            "name": TOOL_NAME,
-            "description": "Propose the next skills to run, in order. Use done=true when the goal is reached.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "plan": {
-                        "type": "array",
-                        "description": "Skill calls to run in order (they stop at the first failure).",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "skill": {"type": "string", "enum": skill_names},
-                                "args": {
-                                    "type": "object",
-                                    "description": "The skill's arguments",
-                                },
-                            },
-                            "required": ["skill", "args"],
-                        },
-                    },
-                    "missing_capability": {
-                        "type": "string",
-                        "description": "What you would need that no skill can do (leave empty if nothing).",
-                    },
-                    "done": {
-                        "type": "boolean",
-                        "description": "true if the goal is already reached",
-                    },
-                },
-                "required": ["plan", "done"],
-            },
-        },
-    }
+                for c in self.calls
+            ],
+        }
 
 
 # --- Turning a raw answer into a plan --------------------------------------------------------
 
 
-def parse_plan(arguments: Any) -> tuple[dict[str, Any] | None, str | None]:
-    """Check the tool's arguments. Returns (clean arguments, None) or (None, error message)."""
-    if isinstance(arguments, str):
-        try:
-            arguments = json.loads(arguments)
-        except json.JSONDecodeError as e:
-            return None, f"the tool arguments are not valid JSON ({e.msg})"
-    if not isinstance(arguments, dict):
-        return None, "the tool arguments must be an object"
+def parse_calls(
+    calls: list[tuple[str | None, str, Any]], tool_names: set[str] | None
+) -> tuple[list[dict[str, Any]] | None, str | None]:
+    """Check (id, name, arguments) calls. Returns (clean calls, None) or (None, error message).
+
+    tool_names: the declared tools (None: do not check the names)."""
+    clean = []
+    for i, (call_id, name, arguments) in enumerate(calls):
+        if not isinstance(name, str) or not name:
+            return None, f"call {i} has no tool name"
+        if tool_names is not None and name not in tool_names:
+            return None, f"{name} is not one of the tools"
+        if isinstance(arguments, str):
+            try:
+                arguments = json.loads(arguments) if arguments.strip() else {}
+            except json.JSONDecodeError as e:
+                return None, f"the arguments of {name} are not valid JSON ({e.msg})"
+        if arguments is None:
+            arguments = {}
+        if not isinstance(arguments, dict):
+            return None, f"the arguments of {name} must be an object"
+        clean.append({"id": call_id or f"call_{i}", "name": name, "args": arguments})
+    return clean, None
+
+
+def calls_from_plan(arguments: Any) -> tuple[list[tuple[str | None, str, Any]] | None, str | None]:
+    """The old answer format {"plan": [...], "missing_capability": ..., "done": ...} as calls."""
     plan = arguments.get("plan", [])
     if not isinstance(plan, list):
         return None, "plan must be a list"
-    clean = []
+    calls: list[tuple[str | None, str, Any]] = []
     for i, step in enumerate(plan):
         if not isinstance(step, dict) or not isinstance(step.get("skill"), str):
             return None, f"plan step {i} must be an object with a 'skill' name"
-        args = step.get("args", {})
-        if not isinstance(args, dict):
-            return None, f"plan step {i}: args must be an object"
-        clean.append({"skill": step["skill"], "args": args})
-    missing = arguments.get("missing_capability") or None
-    return {
-        "plan": clean,
-        "missing_capability": missing if isinstance(missing, str) else None,
-        "done": bool(arguments.get("done", False)),
-    }, None
+        calls.append((None, step["skill"], step.get("args", {})))
+    missing = arguments.get("missing_capability")
+    if isinstance(missing, str) and missing:
+        calls.append((None, MISSING_CAPABILITY, {"description": missing}))
+    if arguments.get("done"):
+        calls.append((None, GOAL_REACHED, {}))
+    return calls, None
 
 
 def json_in_text(text: str) -> Any:
@@ -158,8 +152,14 @@ def json_in_text(text: str) -> Any:
     return None
 
 
-def reply_from_openai(raw: dict[str, Any], latency: float | None = None) -> LLMReply:
-    """Read an OpenAI-compatible chat completion: a tool call, or a JSON plan in the text."""
+def reply_from_openai(
+    raw: dict[str, Any],
+    latency: float | None = None,
+    tool_names: set[str] | None = None,
+) -> LLMReply:
+    """Read an OpenAI-compatible chat completion: tool calls, or a JSON call or plan in the text.
+
+    tool_names: the declared tools; a call to another name is a parse_error (None: not checked)."""
     usage = raw.get("usage") or {}
     tokens: dict[str, int | None] | None = (
         {
@@ -177,29 +177,45 @@ def reply_from_openai(raw: dict[str, Any], latency: float | None = None) -> LLMR
         return reply
     reply.text = message.get("content") or None
 
-    calls = [
-        c
-        for c in (message.get("tool_calls") or [])
-        if c.get("function", {}).get("name") == TOOL_NAME
-    ]
-    if calls:
-        arguments, error = parse_plan(calls[0]["function"].get("arguments", {}))
-        reply.parse_mode = "tool_call"
-    elif reply.text and (found := json_in_text(reply.text)) is not None:
-        arguments, error = parse_plan(found)
+    raw_calls: list[tuple[str | None, str, Any]] | None
+    error: str | None = None
+    if message.get("tool_calls"):
+        raw_calls = [
+            (c.get("id"), c.get("function", {}).get("name"), c.get("function", {}).get("arguments"))
+            for c in message["tool_calls"]
+        ]
+        reply.parse_mode = "tool_calls"
+    elif reply.text and isinstance(found := json_in_text(reply.text), dict):
         reply.parse_mode = "text_json"
+        if "plan" in found:
+            raw_calls, error = calls_from_plan(found)
+        elif "name" in found:
+            raw_calls = [(None, found["name"], found.get("arguments", {}))]
+        else:
+            raw_calls, error = None, "the JSON in the answer is neither a tool call nor a plan"
     else:
-        arguments, error = (
-            None,
-            f"no {TOOL_NAME} tool call and no JSON plan in the answer",
-        )
+        raw_calls, error = None, "no tool call in the answer: call the skills as tools"
 
-    if error or arguments is None:
-        reply.parse_error = error or "the plan could not be read"
-    else:
-        reply.plan = arguments["plan"]
-        reply.missing_capability = arguments["missing_capability"]
-        reply.done = arguments["done"]
+    calls = None
+    if raw_calls is not None:
+        calls, error = parse_calls(raw_calls, tool_names)
+    if error or calls is None:
+        reply.parse_error = error or "the answer could not be read"
+        return reply
+
+    reply.calls = calls
+    reply.plan = [
+        {"skill": c["name"], "args": c["args"]}
+        for c in calls
+        if c["name"] not in (GOAL_REACHED, MISSING_CAPABILITY)
+    ]
+    reply.done = any(c["name"] == GOAL_REACHED for c in calls)
+    missing = [
+        c["args"].get("description")
+        for c in calls
+        if c["name"] == MISSING_CAPABILITY
+    ]
+    reply.missing_capability = next((m for m in missing if isinstance(m, str) and m), None)
     return reply
 
 
@@ -230,6 +246,25 @@ class OpenAICompatibleLLM:
         self._client = httpx.Client(
             base_url=self.base_url, timeout=REQUEST_TIMEOUT, trust_env=False
         )
+        self._context_length: int | None = None
+
+    def context_length(self) -> int | None:
+        """The context size the server really loaded the model with, if it says so (Ollama:
+        /api/ps, once the model is loaded). None if unknown.
+
+        Seen with Ollama's default (4096 tokens): past it, the start of the conversation is cut
+        without any error, and the model's answers fall apart."""
+        if self._context_length is None:
+            root = self.base_url.rstrip("/").removesuffix("/v1")
+            try:
+                models = self._client.get(f"{root}/api/ps").json().get("models", [])
+                self._context_length = next(
+                    (m.get("context_length") for m in models if self.model in (m.get("name"), m.get("model"))),
+                    None,
+                )
+            except (httpx.HTTPError, ValueError, AttributeError):
+                pass  # not Ollama, or not loaded yet: unknown
+        return self._context_length
 
     @property
     def model_info(self) -> dict[str, Any]:
@@ -237,7 +272,11 @@ class OpenAICompatibleLLM:
             "provider": "openai_compatible",
             "base_url": self.base_url,
             "name": self.model,
-            "params": {"temperature": self.temperature, "seed": self.seed},
+            "params": {
+                "temperature": self.temperature,
+                "seed": self.seed,
+                "context_length": self.context_length(),
+            },
         }
 
     def __call__(
@@ -261,14 +300,26 @@ class OpenAICompatibleLLM:
             raise LLMError(
                 f"LLM answered HTTP {response.status_code}: {response.text[:300]}"
             )
-        return reply_from_openai(
-            response.json(), latency=round(time.monotonic() - start, 3)
+        reply = reply_from_openai(
+            response.json(),
+            latency=round(time.monotonic() - start, 3),
+            tool_names={t["function"]["name"] for t in tools},
         )
+        context = self.context_length()
+        prompt = (reply.tokens or {}).get("prompt")
+        if context and prompt and prompt > CONTEXT_WARNING * context:
+            print(
+                f"WARNING: the prompt ({prompt} tokens) fills {prompt / context:.0%} of the LLM's "
+                f"context ({context}): the server may cut the start of the conversation",
+                file=sys.stderr,
+            )
+        return reply
 
 
 class FakeLLM:
-    """A scripted LLM for tests: returns the given answers in order (dicts of tool arguments, or
-    strings for a text answer)."""
+    """A scripted LLM for tests: returns the given answers in order. A dict
+    {"plan": [{"skill", "args"}], "done", "missing_capability"} becomes tool calls; a string is a
+    text answer."""
 
     def __init__(self, answers: list[dict[str, Any] | str]):
         self.answers = list(answers)
@@ -288,9 +339,17 @@ class FakeLLM:
         if isinstance(answer, str):
             message = {"role": "assistant", "content": answer}
         else:
-            call = {
-                "type": "function",
-                "function": {"name": TOOL_NAME, "arguments": json.dumps(answer)},
+            calls, _ = calls_from_plan(answer)
+            message = {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": f"call_{len(self.calls)}_{i}",
+                        "type": "function",
+                        "function": {"name": name, "arguments": json.dumps(args)},
+                    }
+                    for i, (_, name, args) in enumerate(calls or [])
+                ],
             }
-            message = {"role": "assistant", "content": None, "tool_calls": [call]}
         return reply_from_openai({"choices": [{"message": message}]}, latency=0.0)

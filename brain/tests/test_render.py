@@ -18,42 +18,34 @@ def test_unavailable_state():
     assert "unavailable" in render.render_state(None)
 
 
-def test_skills_in_the_system_prompt():
-    prompt = render.system_prompt(CATALOGUE)
-    assert "- mine(block, count=1): Get count blocks of a type." in prompt
-    assert "Can fail with: block_not_found." in prompt
-    assert '{"plan": [{"skill"' in prompt  # the literal JSON example survived str.format
+def test_each_skill_is_a_tool_plus_the_two_others():
+    tools = render.skill_tools(CATALOGUE)
+    assert [t["function"]["name"] for t in tools] == ["mine", "craft", "goal_reached", "missing_capability"]
+    mine = tools[0]["function"]
+    assert mine["description"] == "Get count blocks of a type. Can fail with: block_not_found."
+    # Ollama does not pass "default" to the model: it is written in the description
+    assert mine["parameters"]["properties"]["count"] == {"type": "integer", "description": "(default 1)"}
+    assert "default" in CATALOGUE["skills"]["mine"]["parameters"]["properties"]["count"]  # not changed
 
 
 def test_results_explain_failures_with_the_catalogue():
-    results = [
-        {"skill": "mine", "args": {"block": "oak_log", "count": 3}, "result": {"success": True, "reason": "ok", "details": {"dug": 3}}},
-        {"skill": "craft", "args": {"item": "wooden_pickaxe"}, "result": {"success": False, "reason": "no_crafting_table", "details": {}}},
-    ]
-    text = render.render_results(results, CATALOGUE, STATE)
-    assert "1. mine(block='oak_log', count=3): ok {'dug': 3}" in text
-    assert "2. craft(item='wooden_pickaxe'): FAILED, reason no_crafting_table (the recipe needs a crafting_table" in text
-    assert "Position:" in text  # followed by the new state
-
-
-def test_enum_values_are_shown():
-    catalogue = {"skills": {"explore": {"description": "Head in a direction.", "reasons": {"invalid_args": "x"},
-        "parameters": {"type": "object", "properties": {"direction": {"type": "string", "enum": ["north", "south_west"]},
-                                                        "distance": {"type": "number", "default": 32}},
-                       "required": ["direction"]}}}}
-    assert "explore(direction (one of: north, south_west), distance=32)" in render.render_skills(catalogue)
+    ok_step = {"skill": "mine", "args": {"block": "oak_log", "count": 3}, "result": {"success": True, "reason": "ok", "details": {"dug": 3}}}
+    failed_step = {"skill": "craft", "args": {"item": "wooden_pickaxe"}, "result": {"success": False, "reason": "no_crafting_table", "details": {}}}
+    assert render.render_result(ok_step, CATALOGUE) == "mine(block='oak_log', count=3): ok {'dug': 3}"
+    assert render.render_result(failed_step, CATALOGUE).startswith(
+        "craft(item='wooden_pickaxe'): FAILED, reason no_crafting_table (the recipe needs a crafting_table")
 
 
 def test_damage_death_and_repeated_failure_are_reported():
-    results = [{"skill": "mine", "args": {"block": "oak_log"},
-                "result": {"success": True, "reason": "ok", "details": {}, "body_events": {"damage_taken": 8, "died": False}}}]
+    step = {"skill": "mine", "args": {"block": "oak_log"},
+            "result": {"success": True, "reason": "ok", "details": {}, "body_events": {"damage_taken": 8, "died": False}}}
+    assert "(you took 8 damage)" in render.render_result(step, CATALOGUE)
     after = {**STATE, "deaths": 1, "position": [-63.5, 33, 91.5]}
-    text = render.render_results(results, CATALOGUE, after, previous_state={**STATE, "deaths": 0}, repeated_failure=True)
-    assert "(you took 8 damage)" in text
+    text = render.render_new_state(after, previous_state={**STATE, "deaths": 0}, repeated_failure=True)
     assert "WARNING: you died since your last plan. You respawned at (-64, 33, 91) and lost your inventory." in text
     assert "already tried exactly this" in text
 
 
 def test_health_change_without_death():
-    text = render.render_results([], CATALOGUE, {**STATE, "health": 12}, previous_state=STATE)
+    text = render.render_new_state({**STATE, "health": 12}, previous_state=STATE)
     assert "Health went down: 20 -> 12." in text

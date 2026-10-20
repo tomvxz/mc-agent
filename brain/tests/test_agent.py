@@ -11,6 +11,12 @@ def events(path):
     return [json.loads(line) for line in path.read_text().splitlines()]
 
 
+def since_last_answer(messages):
+    """The messages the LLM got after its previous answer (tool answers, then the new state)."""
+    last = max(i for i, m in enumerate(messages) if m["role"] == "assistant")
+    return messages[last + 1:]
+
+
 def plan(*steps, done=False, missing=None):
     return {"plan": [{"skill": s, "args": a} for s, a in steps], "done": done, "missing_capability": missing}
 
@@ -28,8 +34,13 @@ def test_a_plan_that_works_then_done(tmp_path):
     log = events(tmp_path / "e.jsonl")
     assert [e["type"] for e in log] == ["episode_start", "llm_turn", "llm_turn", "episode_end"]
     assert log[0]["run_id"] == "run-test" and "code_version" in log[0]
-    # The second LLM call saw the results of the first plan
-    assert "Results of your plan" in llm.calls[1][-1]["content"]
+    # The second LLM call got one answer per call, linked by id, then the new state
+    fed_back = since_last_answer(llm.calls[1])
+    assert [m["role"] for m in fed_back] == ["tool", "tool", "user"]
+    assert fed_back[0]["content"].startswith("mine(block='oak_log', count=3): ok")
+    asked = llm.calls[1][-4]["tool_calls"]  # the first answer, put back in the conversation
+    assert [m["tool_call_id"] for m in fed_back[:2]] == [c["id"] for c in asked]
+    assert fed_back[2]["content"].startswith("New state:")
 
 
 def test_a_failure_stops_the_plan_and_the_llm_gets_the_reason(tmp_path):
@@ -44,8 +55,9 @@ def test_a_failure_stops_the_plan_and_the_llm_gets_the_reason(tmp_path):
     outcome = run_episode("craft a pickaxe", body.client(), llm, episodes_file=tmp_path / "e.jsonl")
 
     assert [r["name"] for r in body.executed] == ["craft", "craft"]  # mine was never run
-    feedback = llm.calls[1][-1]["content"]
-    assert "FAILED, reason no_crafting_table (the recipe needs a crafting_table" in feedback
+    fed_back = [m["content"] for m in since_last_answer(llm.calls[1])]
+    assert "FAILED, reason no_crafting_table (the recipe needs a crafting_table" in fed_back[0]
+    assert fed_back[1].startswith("not run")  # mine still gets an answer
     assert outcome["reason"] == "done"  # done=true with a plan that then succeeded
 
 
@@ -57,7 +69,26 @@ def test_an_unusable_answer_is_explained_and_asked_again(tmp_path):
     assert outcome["reason"] == "done"
     assert "could not be used" in llm.calls[1][-1]["content"]
     turns = [e for e in events(tmp_path / "e.jsonl") if e["type"] == "llm_turn"]
-    assert "no propose_plans tool call" in turns[0]["parse_error"]
+    assert "no tool call" in turns[0]["parse_error"]
+
+
+def test_a_first_empty_answer_does_not_use_a_turn(tmp_path):
+    body = FakeBody(lambda name, args: failed("block_not_found"))
+    llm = FakeLLM(["", plan(("mine", {"block": "diamond_ore"})), "", "", plan(done=True)])
+    outcome = run_episode("get diamonds", body.client(), llm, max_turns=3, episodes_file=tmp_path / "e.jsonl")
+
+    # turns: empty (free), plan (1), empty (free), empty again (2), done (3)
+    assert outcome["reason"] == "done"
+    turns = [e for e in events(tmp_path / "e.jsonl") if e["type"] == "llm_turn"]
+    assert len(turns) == 5  # every call is logged, the free ones too
+
+
+def test_empty_answers_in_a_row_end_up_using_turns(tmp_path):
+    body = FakeBody(lambda name, args: ok())
+    llm = FakeLLM([""] * 6)
+    outcome = run_episode("anything", body.client(), llm, max_turns=3, episodes_file=tmp_path / "e.jsonl")
+    assert outcome["reason"] == "max_turns"
+    assert len(llm.calls) == 6  # free, counted, free, counted, free, counted
 
 
 def test_max_turns(tmp_path):
@@ -94,12 +125,21 @@ def test_an_llm_error_ends_the_episode(tmp_path):
     assert events(tmp_path / "e.jsonl")[-1]["outcome"]["reason"] == "llm_error"
 
 
-def test_an_empty_plan_without_done_is_sent_back(tmp_path):
+def test_only_missing_capability_is_answered_and_sent_back(tmp_path):
     body = FakeBody(lambda name, args: ok())
-    llm = FakeLLM([plan(), plan(done=True)])  # turn 0: plan [] and done false
+    llm = FakeLLM([plan(missing="fly"), plan(done=True)])  # turn 0: no skill, not done
     outcome = run_episode("anything", body.client(), llm, episodes_file=tmp_path / "e.jsonl")
     assert outcome["reason"] == "done" and body.executed == []
-    assert "Your plan is empty" in llm.calls[1][-1]["content"]
+    fed_back = since_last_answer(llm.calls[1])
+    assert (fed_back[0]["role"], fed_back[0]["content"]) == ("tool", "noted")
+    assert "You called no skill" in fed_back[1]["content"]
+
+
+def test_goal_reached_after_a_failure_is_not_accepted(tmp_path):
+    body = FakeBody(lambda name, args: failed("no_tool"))
+    llm = FakeLLM([plan(("mine", {"block": "stone"}), done=True), plan(done=True)])
+    run_episode("stone", body.client(), llm, episodes_file=tmp_path / "e.jsonl")
+    assert since_last_answer(llm.calls[1])[1]["content"].startswith("not accepted")
 
 
 def test_a_repeated_failure_gets_a_warning(tmp_path):
