@@ -1,30 +1,87 @@
-const test = require('node:test')
-const assert = require('node:assert')
-const runSkill = require('../../src/runSkill')
-const { fakeBot } = require('./fakeBot')
+import assert from "node:assert";
+import test from "node:test";
+import runSkill from "../../src/runSkill.js";
+import { fakeBot } from "./fakeBot.js";
 
-test('a successful skill keeps its result and gets a duration', async () => {
-    const r = await runSkill(fakeBot(), async () => ({ success: true, reason: 'ok', details: {} }), {})
-    assert.strictEqual(r.success, true)
-    assert.strictEqual(r.reason, 'ok')
-    assert.strictEqual(typeof r.duration, 'number')
-})
+test("a successful skill keeps its result and gets a duration", async () => {
+  const r = await runSkill(
+    fakeBot(),
+    async () => ({ success: true, reason: "ok", details: {} }),
+    {},
+  );
+  assert.strictEqual(r.success, true);
+  assert.strictEqual(r.reason, "ok");
+  assert.strictEqual(typeof r.duration, "number");
+});
 
-test('a skill that takes too long returns timeout and stops the pathfinder', async () => {
-    const bot = fakeBot()
-    let stopped = false
-    bot.pathfinder.setGoal = (goal) => { if (goal === null) stopped = true }
-    const r = await runSkill(bot, () => new Promise(() => {}), {}, 100)
-    assert.strictEqual(r.reason, 'timeout')
-    assert.strictEqual(stopped, true)
-})
+test("a skill that takes too long returns timeout and stops the pathfinder", async () => {
+  const bot = fakeBot();
+  let stopped = false;
+  bot.pathfinder.setGoal = (goal) => {
+    if (goal === null) stopped = true;
+  };
+  const r = await runSkill(bot, () => new Promise(() => {}), {}, 100);
+  assert.strictEqual(r.reason, "timeout");
+  assert.strictEqual(stopped, true);
+});
 
 test('an exception becomes an "exception" failure', async () => {
-    const r = await runSkill(fakeBot(), async () => { throw new Error('boom') }, {})
-    assert.deepStrictEqual([r.success, r.reason, r.details.error], [false, 'exception', 'boom'])
-})
+  const r = await runSkill(
+    fakeBot(),
+    async () => {
+      throw new Error("boom");
+    },
+    {},
+  );
+  assert.deepStrictEqual(
+    [r.success, r.reason, r.details.error],
+    [false, "exception", "boom"],
+  );
+  assert.deepStrictEqual([r.error.type, r.error.message], ["Error", "boom"]);
+  assert.ok(r.error.stack.includes("runSkill.test.js"));
+});
 
 test('a malformed result becomes "bad_result"', async () => {
-    const r = await runSkill(fakeBot(), async () => 'not an object', {})
-    assert.deepStrictEqual([r.success, r.reason], [false, 'bad_result'])
-})
+  const r = await runSkill(fakeBot(), async () => "not an object", {});
+  assert.deepStrictEqual([r.success, r.reason], [false, "bad_result"]);
+});
+
+test("a timed-out skill is really stopped: its later actions are refused", async () => {
+  const bot = fakeBot();
+  const done = [];
+  bot.pathfinder.goto = async () => {
+    done.push("goto");
+  };
+  const slow = async (b) => {
+    await new Promise((r) => setTimeout(r, 150)); // still busy when the time limit hits
+    await b.pathfinder.goto(); // must be refused: the skill was stopped
+    done.push("after goto");
+  };
+  const r = await runSkill(bot, slow, {}, 50);
+  assert.strictEqual(r.reason, "timeout");
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  assert.deepStrictEqual(done, []); // the ghost skill did nothing
+
+  // The next skill is not affected
+  const r2 = await runSkill(
+    bot,
+    async (b) => {
+      await b.pathfinder.goto();
+      return { success: true, reason: "ok", details: {} };
+    },
+    {},
+  );
+  assert.strictEqual(r2.success, true);
+  assert.deepStrictEqual(done, ["goto"]);
+});
+
+test("actions outside any skill (pathfinder loop, test setup) are never refused", async () => {
+  const bot = fakeBot();
+  let calls = 0;
+  bot.pathfinder.goto = async () => {
+    calls++;
+  };
+  await runSkill(bot, () => new Promise(() => {}), {}, 20); // a skill that times out
+  await bot.pathfinder.goto(); // called from outside a skill: allowed
+  assert.strictEqual(calls, 1);
+});
