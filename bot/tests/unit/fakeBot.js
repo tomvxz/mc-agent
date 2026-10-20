@@ -76,6 +76,10 @@ function fakeBot(options = {}) {
             bestHarvestTool: () => null,
         },
         stopDigging: () => {},
+        // The keys held (forward, jump...), like Mineflayer's controlState
+        controlState: {},
+        setControlState(key, value) { this.controlState[key] = value },
+        clearControlStates() { this.controlState = {} },
         // A game action called by mistake must make the test fail
         equip: async () => { throw new Error('equip should not be called') },
         consume: async () => { throw new Error('consume should not be called') },
