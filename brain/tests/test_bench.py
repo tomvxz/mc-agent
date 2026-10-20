@@ -12,6 +12,7 @@ def plan(*steps, done=False):
 def test_the_places_are_the_same_for_a_seed():
     assert bench.draw_places(1, 3) == bench.draw_places(1, 3)
     assert bench.draw_places(1, 3) != bench.draw_places(2, 3)
+    assert bench.draw_places(1, 3) == bench.draw_places(1, 9)[:3]  # replacements come after: places 0-2 unchanged
     assert all(abs(x) <= bench.SPREAD and abs(z) <= bench.SPREAD for x, z in bench.draw_places(1, 20))
 
 
@@ -24,14 +25,19 @@ def test_one_place_is_set_up_run_and_checked_on_the_state(tmp_path):
         return ok()
 
     body.execute = collect
-    llm = FakeLLM([plan(*[("collect_block", {"x": 1, "y": 64, "z": i}) for i in range(3)]), plan(done=True)])
+    llm = FakeLLM([
+        plan(("define_goal", {"item": "oak_log", "count": 3})),  # the goal condition, before the loop
+        plan(*[("collect_block", {"x": 1, "y": 64, "z": i}) for i in range(3)]),
+    ])
     task = bench.TASKS["oak_logs"]
     r = bench.run_place(task, body.client(), llm, place=4, x=10, z=-20, seed=1, max_turns=5)
 
     assert body.setups == [{"x": 10, "z": -20, "inventory": {}}]
-    assert (r["verified"], r["claimed"], r["end"], r["turns"], r["skill_calls"]) == (True, True, "done", 2, 3)
+    # The code saw 3 oak_log and ended the episode: no turn for goal_reached, the definition not counted
+    assert (r["verified"], r["claimed"], r["end"], r["turns"], r["skill_calls"]) == (True, True, "condition_met", 1, 3)
+    assert r["condition"] == {"have": {"oak_log": 3}}
     assert r["watched_near"] is True  # the fake state has oak_log in notable_blocks
-    assert "[4] (10, -20): REACHED (claimed), 2 turns" in bench.format_record(r)
+    assert "[4] (10, -20): REACHED (claimed), 1 turns" in bench.format_record(r)
 
 
 def test_claimed_and_verified_are_counted_apart():

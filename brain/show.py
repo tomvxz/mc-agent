@@ -17,7 +17,9 @@ import pathlib
 import sys
 from typing import Any
 
+from brain import goal as goals
 from brain.journal import episodes_file
+from brain.llm import reply_from_openai
 
 WIDTH = 150  # long details are cut to this many characters
 
@@ -80,6 +82,10 @@ def show(
                 for m in event["new_messages"]:
                     text = m.get("content") or json.dumps(m.get("tool_calls"))
                     lines.append(f"  | {m['role']}: " + text.replace("\n", "\n  |   "))
+            if goals.is_definition_turn(event) and not event.get("parse_error"):
+                condition, _ = goals.parse_condition(reply_from_openai(event["raw_response"]).calls)
+                lines.append(f"  goal condition: {condition['have'] if condition else 'none (not about items)'}")
+                continue
             if event.get("parse_error"):
                 message = (event.get("raw_response") or {}).get("choices", [{}])[0].get("message", {})
                 lines.append(f"  UNUSABLE: {event['parse_error']}")

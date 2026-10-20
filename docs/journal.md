@@ -274,6 +274,16 @@ The exact conversation of turn `n` is: `system_prompt` + `tools` + the `new_mess
 `0..n`, concatenated. The skill calls of the plan are the transitions with the same `episode_id`
 and `turn`.
 
+**Goal definition turn** (brain/goal.py, when the goal condition is on): turn 0 can be a SEPARATE
+conversation, before the loop, where the LLM turns the goal into a condition with the tool
+`define_goal(item, count)` (one call per item). Its `new_messages` start with its own system
+message (that is how it is recognized), `plan` is `[]`, and the condition is in its
+`raw_response` (recomputed, not stored: `goal.parse_condition`). The tool definition is in
+`brain/render.py`, identified by `code_version`. The loop's turns then start at 1, and the
+conversation of turn `n` is `system_prompt` + `tools` + the `new_messages` of turns `1..n`.
+An unusable definition is not asked again: `parse_error` says why, and the episode goes on without
+a condition (the LLM's goal_reached).
+
 Messages use the OpenAI chat format:
 ```jsonc
 { "role": "user", "content": "Goal: …\n\nPosition: …" }                    // goal, new state, error feedback
@@ -288,9 +298,9 @@ An unusable answer is put back as `{ "role": "assistant", "content": "<its text>
 ```jsonc
 { "schema_version": 1, "type": "episode_end", "episode_id": "ep-…", "seq": 9, "ts": "…",
   "outcome": {
-    "success": true,              // goal reached (LLM's done for now; a state check later)
-    "reason": "done",             // done | max_turns | body_error | llm_error | interrupted (Ctrl+C) | crash
-    "turns": 3,                   // number of llm_turn events (counted by brain/journal.py)
+    "success": true,              // goal reached: the goal condition met (checked by the code), or the LLM's goal_reached
+    "reason": "done",             // condition_met | done | max_turns | body_error | llm_error | interrupted (Ctrl+C) | crash
+    "turns": 3,                   // number of llm_turn events, the goal definition included (counted by brain/journal.py)
     "skill_calls": 7,             // null when unknown (after a crash)
     "duration": 84.2,             // seconds since episode_start (measured by brain/journal.py)
     "error": null                 // message when reason is an error

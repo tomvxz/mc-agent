@@ -13,6 +13,7 @@ latent space can replace it later without changing the agent loop.
 
 from typing import Any
 
+from brain.goal import DEFINE_GOAL
 from brain.llm import GOAL_REACHED, MISSING_CAPABILITY
 
 SYSTEM_PROMPT = """You control a Minecraft bot. Each skill is a tool: you reach goals by chaining skills.
@@ -43,6 +44,20 @@ NEXT_STEP = (
     "Next: call all the skills you can already decide (several calls in one answer). "
     "If the goal is reached, call the tool goal_reached."
 )
+
+
+# The separate call before the loop that turns the goal into a condition (brain/goal.py).
+# Flat arguments (item, count), not an object {item: count}: qwen2.5:3b closed the nested object
+# wrongly ('{"have": {"oak_log": 3}})'), Ollama could not read the call and dropped it (empty answer).
+DEFINE_GOAL_PROMPT = """You turn a Minecraft goal into a condition that a program checks on the bot's inventory.
+Answer only by calling the tool define_goal, with the item the goal asks for, that the inventory
+must contain at the end, and its count. Only what the goal asks for: never the ingredients or
+tools needed to make it. Use Minecraft item names: lowercase, underscores, singular.
+Examples:
+- "collect 3 oak logs": define_goal(item="oak_log", count=3)
+- "craft a wooden pickaxe": define_goal(item="wooden_pickaxe", count=1)
+If the goal asks for several items, call define_goal once per item.
+If the goal is not about having items (for example "build a shelter"), call define_goal without item."""
 
 
 # --- Small helpers ----------------------------------------------------------------------------
@@ -136,6 +151,42 @@ def system_prompt() -> str:
     return SYSTEM_PROMPT
 
 
+def goal_definition_tools() -> list[dict[str, Any]]:
+    """The only tool of the goal definition call."""
+    return [
+        _tool(
+            DEFINE_GOAL,
+            "Define the condition that tells when the goal is reached: an item the inventory must contain.",
+            {
+                "type": "object",
+                "properties": {
+                    "item": {
+                        "type": "string",
+                        "description": "item name, e.g. 'oak_log'; leave it out if the goal is not about items",
+                    },
+                    "count": {"type": "integer", "description": "how many (default 1)"},
+                },
+            },
+        )
+    ]
+
+
+def render_goal_definition(goal: str) -> list[dict[str, Any]]:
+    """The messages of the goal definition call: its own system message, then the goal."""
+    return [
+        {"role": "system", "content": DEFINE_GOAL_PROMPT},
+        {"role": "user", "content": f"Goal: {goal}"},
+    ]
+
+
+def render_progress(progress: dict[str, tuple[int, int]] | None) -> str | None:
+    """ "Goal progress: oak_log 2/3." (computed by the code, see brain/goal.py), None if no condition."""
+    if not progress:
+        return None
+    parts = ", ".join(f"{item} {have}/{wanted}" for item, (have, wanted) in progress.items())
+    return f"Goal progress: {parts}."
+
+
 def render_state(state: dict[str, Any] | None) -> str:
     """A short text view of the full state (the 11x11x11 block grid is left out on purpose)."""
     if state is None:
@@ -191,9 +242,12 @@ def render_state(state: dict[str, Any] | None) -> str:
     return "\n".join(lines)
 
 
-def render_goal(goal: str, state: dict[str, Any] | None) -> str:
+def render_goal(
+    goal: str, state: dict[str, Any] | None, progress: dict[str, tuple[int, int]] | None = None
+) -> str:
     """The first user message of an episode."""
-    return f"Goal: {goal}\n\n{render_state(state)}\n\n{NEXT_STEP}"
+    line = render_progress(progress)
+    return f"Goal: {goal}\n\n{render_state(state)}\n\n" + (f"{line}\n" if line else "") + NEXT_STEP
 
 
 def _body_events(result: dict[str, Any]) -> str:
@@ -252,10 +306,16 @@ def render_not_run() -> str:
     return "not run: an earlier call failed (or too many calls in one answer)"
 
 
-def render_noted(name: str, plan_succeeded: bool) -> str:
-    """The answer to a goal_reached or missing_capability call."""
+def render_noted(
+    name: str, plan_succeeded: bool, progress: dict[str, tuple[int, int]] | None = None
+) -> str:
+    """The answer to a goal_reached or missing_capability call. progress: the goal condition's,
+    when there is one (goal_reached is then only noted if the condition is met)."""
     if name == GOAL_REACHED and not plan_succeeded:
         return "not accepted: a skill failed, so the goal is not reached yet"
+    if name == GOAL_REACHED and progress and any(have < wanted for have, wanted in progress.values()):
+        missing = ", ".join(f"{item} {have}/{wanted}" for item, (have, wanted) in progress.items())
+        return f"not accepted: the goal is not reached yet ({missing})"
     return "noted"
 
 
@@ -263,11 +323,13 @@ def render_new_state(
     state: dict[str, Any] | None,
     previous_state: dict[str, Any] | None = None,
     repeated_failure: bool = False,
+    progress: dict[str, tuple[int, int]] | None = None,
 ) -> str:
-    """After the answers to the calls: warnings, then the new state.
+    """After the answers to the calls: warnings, then the new state, the goal progress if any.
 
     previous_state: the state shown at the previous turn (to report deaths and health changes).
     repeated_failure: the last failure is exactly the same as at the previous turn.
+    progress: the goal condition's progress (brain/goal.py), None without a condition.
     """
     lines = []
     if repeated_failure:
@@ -279,6 +341,8 @@ def render_new_state(
     lines.append("New state:")
     lines.append(render_state(state))
     lines.append("")
+    if line := render_progress(progress):
+        lines.append(line)
     lines.append(NEXT_STEP)
     return "\n".join(lines)
 

@@ -30,7 +30,7 @@ REPO = Path(__file__).resolve().parents[1]
 # Development data by default; a collection run writes into its own folder (Body.run()["data_dir"])
 DEFAULT_FILE = REPO / "data" / "dev" / "episodes.jsonl"
 
-END_REASONS = {"done", "max_turns", "body_error", "llm_error", "interrupted", "crash"}
+END_REASONS = {"done", "condition_met", "max_turns", "body_error", "llm_error", "interrupted", "crash"}
 
 
 def episodes_file() -> Path:

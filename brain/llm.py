@@ -22,6 +22,10 @@ too (parse_mode "text_json"): a call {"name": ..., "arguments": {...}} or a plan
 {"plan": [{"skill": ..., "args": {...}}], "missing_capability": ..., "done": ...}.
 Anything else gives a parse_error, which the agent sends back to the LLM.
 
+A number written as a string ("3" for an integer parameter: seen with llama3.1:8b, ten times in a
+row) is converted, following the types the tools declare. Nothing else is: the body stays strict.
+The raw answer is recorded unchanged.
+
 The text/JSON exchange is a temporary interface: the agent loop only handles plans and results,
 so a later world model (or a shared latent space) can replace this file and render.py without
 touching the loop.
@@ -29,6 +33,7 @@ touching the loop.
 
 import json
 import os
+import re
 import sys
 import time
 from dataclasses import dataclass, field
@@ -90,12 +95,42 @@ class LLMReply:
 # --- Turning a raw answer into a plan --------------------------------------------------------
 
 
+def param_types(tools: list[dict[str, Any]]) -> dict[str, dict[str, str]]:
+    """{tool: {parameter: JSON type}} from the declared tools."""
+    return {
+        t["function"]["name"]: {
+            name: p.get("type")
+            for name, p in t["function"].get("parameters", {}).get("properties", {}).items()
+        }
+        for t in tools
+    }
+
+
+INTEGER = re.compile(r"[+-]?\d+")
+NUMBER = re.compile(r"[+-]?(\d+(\.\d*)?|\.\d+)")
+
+
+def as_declared(value: Any, kind: str | None) -> Any:
+    """A string holding exactly a number, for an integer or number parameter, as that number."""
+    if not isinstance(value, str):
+        return value
+    text = value.strip()
+    if kind == "integer" and INTEGER.fullmatch(text):
+        return int(text)
+    if kind == "number" and NUMBER.fullmatch(text):
+        return int(text) if INTEGER.fullmatch(text) else float(text)
+    return value
+
+
 def parse_calls(
-    calls: list[tuple[str | None, str, Any]], tool_names: set[str] | None
+    calls: list[tuple[str | None, str, Any]],
+    tool_names: set[str] | None,
+    types: dict[str, dict[str, str]] | None = None,
 ) -> tuple[list[dict[str, Any]] | None, str | None]:
     """Check (id, name, arguments) calls. Returns (clean calls, None) or (None, error message).
 
-    tool_names: the declared tools (None: do not check the names)."""
+    tool_names: the declared tools (None: do not check the names).
+    types: {tool: {parameter: JSON type}} (param_types): numbers written as strings are converted."""
     clean = []
     for i, (call_id, name, arguments) in enumerate(calls):
         if not isinstance(name, str) or not name:
@@ -111,6 +146,8 @@ def parse_calls(
             arguments = {}
         if not isinstance(arguments, dict):
             return None, f"the arguments of {name} must be an object"
+        declared = (types or {}).get(name, {})
+        arguments = {k: as_declared(v, declared.get(k)) for k, v in arguments.items()}
         clean.append({"id": call_id or f"call_{i}", "name": name, "args": arguments})
     return clean, None
 
@@ -156,10 +193,12 @@ def reply_from_openai(
     raw: dict[str, Any],
     latency: float | None = None,
     tool_names: set[str] | None = None,
+    types: dict[str, dict[str, str]] | None = None,
 ) -> LLMReply:
     """Read an OpenAI-compatible chat completion: tool calls, or a JSON call or plan in the text.
 
-    tool_names: the declared tools; a call to another name is a parse_error (None: not checked)."""
+    tool_names: the declared tools; a call to another name is a parse_error (None: not checked).
+    types: the declared parameter types (param_types), to convert numbers written as strings."""
     usage = raw.get("usage") or {}
     tokens: dict[str, int | None] | None = (
         {
@@ -198,7 +237,7 @@ def reply_from_openai(
 
     calls = None
     if raw_calls is not None:
-        calls, error = parse_calls(raw_calls, tool_names)
+        calls, error = parse_calls(raw_calls, tool_names, types)
     if error or calls is None:
         reply.parse_error = error or "the answer could not be read"
         return reply
@@ -304,6 +343,7 @@ class OpenAICompatibleLLM:
             response.json(),
             latency=round(time.monotonic() - start, 3),
             tool_names={t["function"]["name"] for t in tools},
+            types=param_types(tools),
         )
         context = self.context_length()
         prompt = (reply.tokens or {}).get("prompt")

@@ -5,7 +5,7 @@ import json
 import httpx
 import pytest
 
-from brain.llm import FakeLLM, LLMError, OpenAICompatibleLLM, json_in_text, reply_from_openai
+from brain.llm import FakeLLM, LLMError, OpenAICompatibleLLM, json_in_text, param_types, reply_from_openai
 
 TOOLS = {"mine", "craft", "scan", "goal_reached", "missing_capability"}
 
@@ -136,3 +136,17 @@ def test_a_prompt_near_the_context_limit_gives_a_warning(capsys):
         llm([], tools)
         assert ("WARNING: the prompt (100 tokens)" in capsys.readouterr().err) == warned
         assert llm.model_info["params"]["context_length"] == context  # recorded in the episode
+
+
+def test_numbers_written_as_strings_follow_the_declared_types():
+    declared = [{"type": "function", "function": {"name": "find", "parameters": {"type": "object", "properties": {
+        "target": {"type": "string"}, "count": {"type": "integer"}, "max_distance": {"type": "number"}}}}}]
+    arguments = {"target": "64", "count": "3", "max_distance": " 32.5 "}
+    r = reply_from_openai(completion({"tool_calls": [tool_call("find", arguments)]}), types=param_types(declared))
+    assert r.plan == [{"skill": "find", "args": {"target": "64", "count": 3, "max_distance": 32.5}}]
+    assert r.history_message()["tool_calls"][0]["function"]["arguments"] == json.dumps(r.calls[0]["args"])
+    # Not exactly a number of the declared type: left as it is, the body refuses it honestly
+    for wrong in ("three", "3.5", "3 logs", ""):
+        r = reply_from_openai(completion({"tool_calls": [tool_call("find", {"count": wrong})]}),
+                              types=param_types(declared))
+        assert r.plan[0]["args"]["count"] == wrong

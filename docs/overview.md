@@ -62,6 +62,7 @@ On the Python side, `brain/agent.py` is the loop: state -> prompt -> LLM -> plan
 
 **brain/** (the mind, Python): `agent.py` loop, `llm.py` the single LLM call (replaceable provider),
 `render.py` every text the LLM reads, `body.py` HTTP client of the body, `journal.py` episode log,
+`goal.py` the goal condition (the LLM turns the goal into data once, the code checks it),
 `show.py` an episode in a readable way (`uv run python -m brain.show [id] [--full]`),
 `bench.py` the episode bench (`uv run python -m brain.bench [--places N] [--seed S]`).
 

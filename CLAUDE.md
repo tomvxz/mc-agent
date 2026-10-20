@@ -28,7 +28,7 @@ branché sur le VRAI jeu via Mineflayer. Projet d'apprentissage : l'utilisateur 
   Les données de développement ne servent JAMAIS à l'entraînement.
 - `brain/` (Python géré par uv, tests : `uv run pytest`) : agent LLM, puis world model supervisé (PyTorch).
   `agent.py` boucle, `llm.py` l'unique appel au LLM, `render.py` TOUS les textes lus par le LLM, `body.py` client HTTP,
-  `journal.py` épisodes. Lancer un épisode : `uv run python -m brain.agent "but" --max-turns N`.
+  `journal.py` épisodes, `goal.py` la condition de but. Lancer un épisode : `uv run python -m brain.agent "but" --max-turns N`.
   Le lire : `uv run python -m brain.show [fin de l'id] [--full]` (`show.py`, lecture seule).
   Banc d'épisodes : `uv run python -m brain.bench [--task T] [--places N] [--seed S]` (`bench.py`) : succès VÉRIFIÉ
   sur l'état (pas seulement le goal_reached du LLM), tours, réponses inutilisables. Une tâche pour l'instant (oak_logs).
@@ -81,6 +81,12 @@ branché sur le VRAI jeu via Mineflayer. Projet d'apprentissage : l'utilisateur 
 ## LLM et boucle de décision
 - Chaque compétence est un OUTIL déclaré au LLM ; les appels d'une réponse, dans l'ordre, forment le plan.
   Deux outils en plus : `goal_reached` et `missing_capability` (ce dont il aurait eu besoin).
+- Condition de but (`brain/goal.py`) : avant la boucle, un appel séparé à un seul outil `define_goal(item, count)`
+  traduit le but en DONNÉES (`{"have": {"oak_log": 3}}`) ; le code la vérifie à chaque état, affiche
+  « Goal progress », termine l'épisode (`condition_met`) et refuse un `goal_reached` trop tôt. Sans condition
+  (« construis un abri ») : `goal_reached` comme avant. `--no-condition` (agent, banc) pour comparer.
+  Arguments PLATS : avec un objet imbriqué, qwen2.5:3b fermait mal les accolades et Ollama jetait l'appel.
+  Les noms d'objets ne sont pas vérifiés (pas de liste dans Python) : erreur vue, « cook a beef » -> `beef`.
   (Avant : un seul outil `propose_plans` contenant une liste de compétences ; qwen2.5:3b appelait les compétences
   directement, Ollama jetait ces appels à des outils inconnus -> réponses vides.)
   Le journaliser ; ajouter des primitives selon la fréquence de ces demandes, pas par intuition.
