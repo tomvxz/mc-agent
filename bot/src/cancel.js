@@ -45,6 +45,8 @@ const BOT_ACTIONS = [
 ];
 const PATHFINDER_ACTIONS = ["goto", "setGoal"];
 
+// Throws SkillCancelled when called from a skill that was stopped (does nothing anywhere else).
+// Also used by the waits of skills/utils.js, so that a stopped skill ends during its next wait.
 function refuseIfCancelled() {
   const token = storage.getStore();
   if (token && token.cancelled) throw new SkillCancelled();
@@ -82,4 +84,4 @@ function startSkill(bot, fn) {
   };
 }
 
-export { SkillCancelled, startSkill };
+export { SkillCancelled, startSkill, refuseIfCancelled };

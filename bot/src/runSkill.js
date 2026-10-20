@@ -36,6 +36,9 @@ async function runSkill(bot, skill, args, timeoutMs = 60000) {
     // and made the following skill fail (instant no_path)
     bot.pathfinder.setGoal(null);
     bot.stopDigging();
+    // Release the keys: a skill stopped while holding "forward" (e.g. walking onto an item)
+    // would otherwise leave the bot walking on its own
+    bot.clearControlStates();
   } finally {
     clearTimeout(timer);
     // A finished skill must not act anymore either (e.g. a forgotten background wait)
