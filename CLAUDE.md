@@ -5,15 +5,21 @@ branché sur le VRAI jeu via Mineflayer. Projet d'apprentissage : l'utilisateur 
 
 ## Architecture
 - `server/` : serveur Paper 1.21.11 local (online-mode=false). Le bot est op.
-- `bot/` : Node.js, Mineflayer + mineflayer-pathfinder, CommonJS (`require`, pas d'ESM).
+- `bot/` : Node.js, Mineflayer + mineflayer-pathfinder, modules ES (`import`/`export`, `"type": "module"`).
+  Extension `.js` obligatoire dans les chemins relatifs. Les bibliothèques CommonJS (Mineflayer, pathfinder...)
+  s'importent par défaut puis se déstructurent : `import pf from 'mineflayer-pathfinder'; const { goals } = pf`
+  (les imports nommés `import { goals } from ...` échouent).
   - `bot.js` : crée le bot, lance les tests (`node --env-file=../.env bot.js testN`, ou `suite <compétence|all> [N]`)
   - `src/skills/` : une compétence par fichier, regroupées dans `index.js` (`utils.js` = fonctions partagées)
   - `src/movements.js` : réglages du pathfinder (déplacements débrouillards + instincts), `src/fixes.js` : correctifs de bugs Mineflayer
   - `tests/unit/` (`npm test`, faux bot, sans serveur) et `tests/game/` (arène reproductible, taux de réussite)
   - `src/runSkill.js` : enveloppe (timeout, capture d'erreurs, durée)
-  - `src/state.js` : `observe(bot)` renvoie l'état structuré (pas de pixels)
+  - `src/state.js` : `observe(bot)` = LA définition unique de l'état (pas de pixels), utilisée par l'API et le journal
+  - `src/trace.js` : ce qui se passe pendant une compétence (touches, trajectoire, actions, blocs, entités, événements)
   - `src/logger.js`, `src/execute.js` : exécute une compétence et journalise la transition
-- `data/transitions.jsonl` : une ligne par compétence {state, skill, next_state, success, reason, duration}. Ignoré par git.
+- `data/` (ignoré par git, format : `docs/journal.md`) : `runs.jsonl`, `transitions.jsonl`, `episodes.jsonl`.
+  `MC_DATA_PURPOSE=dev` (défaut) -> `data/dev/`, jetable ; `collection` -> `data/collection/<run_id>/`.
+  Les données de développement ne servent JAMAIS à l'entraînement.
 - `brain/` (Python géré par uv) : agent LLM, puis world model supervisé (PyTorch).
 - Communication corps/cerveau : Node (le corps) expose une petite API HTTP locale ; Python (le cerveau) l'appelle.
   Node ne contient aucune logique de décision ; Python ne parle jamais directement à Minecraft.
@@ -27,7 +33,13 @@ branché sur le VRAI jeu via Mineflayer. Projet d'apprentissage : l'utilisateur 
 - Ne pas mettre à jour les dépendances (pas de `npm audit fix`, `npm update`) : versions figées par package-lock.json.
 - Le bot est créé une seule fois dans `bot.js` et passé en argument ; les modules ne créent pas de bot.
 - Le journal est la matière première du world model : ne jamais le modifier à la main ni filtrer les échecs.
-- Garder l'état de `observe` simple ; tout champ ajouté doit rester optionnel pour les anciennes lignes.
+- Un seul format d'état : `observe`. Le LLM ne le lit pas brut : le cerveau en fabrique un texte court pour le prompt
+  (une présentation, pas un second format). Tout champ ajouté doit rester optionnel pour les anciennes lignes.
+- Changer le COMPORTEMENT d'une compétence = augmenter sa `version` dans `catalogue.js` (les lignes la notent).
+- Ne jamais accélérer le serveur (`/tick rate`) pour collecter : Mineflayer reste en temps réel, les données seraient faussées.
+- Commandes serveur envoyées par notre code : toujours via `src/commands.js` (`runCommand`).
+- Format du journal GELÉ jusqu'à l'étape 7 : pas de nouveau champ. On garde ce qui aide à comprendre une compétence maintenant.
+- Ne pas stocker ce qui se recalcule exactement à partir du journal (liste dans `docs/journal.md`).
 
 ## Philosophie des compétences (décision de conception)
 - Le LLM COMPOSE : il enchaîne des compétences pour atteindre un but. Ne pas écrire une compétence par objectif.
@@ -61,6 +73,7 @@ branché sur le VRAI jeu via Mineflayer. Projet d'apprentissage : l'utilisateur 
   (prédiction avant l'action, détection de surprise après).
 
 ## Journal : un format solide (matière première du world model et du futur espace latent)
+- Format exact (champs, versions, exemples) : `docs/journal.md`. Le tenir à jour à chaque changement de version.
 - Deux fichiers JSONL, une ligne = un événement, jamais réécrits :
   - `data/transitions.jsonl` (écrit par Node) : une ligne par compétence exécutée.
   - `data/episodes.jsonl` (écrit par Python) : but, prompt, réponse brute du LLM, plan, `missing_capability`, résultat final.
