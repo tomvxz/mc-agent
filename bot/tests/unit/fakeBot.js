@@ -1,8 +1,9 @@
 // A fake bot, just realistic enough to test skills without Minecraft.
 // We do not simulate the game: only what the skills read before acting.
 
-const { EventEmitter } = require('events')
-const registry = require('minecraft-data')('1.21.11')
+import { EventEmitter } from 'node:events'
+import minecraftData from 'minecraft-data'
+const registry = minecraftData('1.21.11')
 
 // A minimal 3D point that mimics Mineflayer's Vec3
 class Point {
@@ -18,6 +19,11 @@ class Point {
     distanceTo(p) { return Math.hypot(this.x - p.x, this.y - p.y, this.z - p.z) }
     toString() { return `${this.x},${this.y},${this.z}` }
     plus(p) { return new Point(this.x + p.x, this.y + p.y, this.z + p.z) }
+    minus(p) { return new Point(this.x - p.x, this.y - p.y, this.z - p.z) }
+    norm() { return Math.hypot(this.x, this.y, this.z) }
+    // Like Vec3: normalize() changes the point itself (and returns it)
+    normalize() { const n = this.norm(); this.x /= n; this.y /= n; this.z /= n; return this }
+    equals(p) { return this.x === p.x && this.y === p.y && this.z === p.z }
 }
 
 // options: { inventory: { bread: 2 }, food: 20, blocks: { '0,0,0': 'stone' }, entities: [...] }
@@ -31,7 +37,10 @@ function fakeBot(options = {}) {
         username: 'Agent',
         food: options.food ?? 20,
         health: 20,
-        time: { timeOfDay: 1000 },
+        time: { timeOfDay: 1000, age: 5000 },
+        game: { gameMode: 'survival', difficulty: 'easy', dimension: 'overworld' },
+        // The network client: some modules listen to raw packets (damage_event...)
+        _client: Object.assign(new EventEmitter(), { write: () => {} }),
         entity: { position: new Point(0.5, 100, 0.5) },
         entities: options.entities || {},
         inventory: {
@@ -44,7 +53,7 @@ function fakeBot(options = {}) {
             const info = registry.blocksByName[name]
             return {
                 name, type: info.id, position: p, diggable: info.diggable, harvestTools: info.harvestTools,
-                boundingBox: info.boundingBox,
+                boundingBox: info.boundingBox, hardness: info.hardness,
             }
         },
         findBlock: () => null,
@@ -74,4 +83,4 @@ function fakeBot(options = {}) {
     })
 }
 
-module.exports = { fakeBot, Point }
+export { fakeBot, Point }
