@@ -5,7 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import { fixDifficulty } from "../../src/fixes.js";
 import { collectionProblem, currentRun, dataDirFor, newRunId, startRun } from "../../src/run.js";
-import { fakeBot } from "./fakeBot.js";
+import { fakeBot, MC_VERSION } from "./fakeBot.js";
 
 // Everything goes to a temporary data folder
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "mc-agent-run-"));
@@ -15,7 +15,7 @@ process.env.MC_DATA_DIR = root;
 const fakeCommand = async (bot, text) => {
     if (text === "/seed") return "Seed: [-123456789]";
     bot.emit("messagestr", "Checking version, please wait..."); // Paper answers in two lines
-    bot.emit("messagestr", "This server is running Paper version 1.21.11");
+    bot.emit("messagestr", `This server is running Paper version ${MC_VERSION}`);
     return "Checking version, please wait...";
 };
 
@@ -48,7 +48,7 @@ test("an invalid purpose is refused", async () => {
 test("a collection run writes run_start in its own folder, with versions and the seed", async () => {
     process.env.MC_DATA_PURPOSE = "collection";
     const bot = fakeBot();
-    bot.version = "1.21.11";
+    bot.version = MC_VERSION;
     const run = await startRun(bot, {
         host: "localhost",
         port: 25565,
@@ -63,7 +63,7 @@ test("a collection run writes run_start in its own folder, with versions and the
     assert.strictEqual(line.type, "run_start");
     assert.strictEqual(line.world_seed, "-123456789");
     assert.strictEqual(line.world_id, "localhost:25565");
-    assert.strictEqual(line.versions.minecraft, "1.21.11");
+    assert.strictEqual(line.versions.minecraft, MC_VERSION);
     assert.ok(!("skills" in line.versions) && !("catalogue" in line.versions)); // replaced by the commit
     assert.match(line.versions.server, /Paper/);
     // The tick rate announced by the server is followed

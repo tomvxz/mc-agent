@@ -25,12 +25,21 @@ def test_state_and_skills():
         if request.url.path == "/state":
             return httpx.Response(200, json={"health": 20, "inventory": {"bread": 2}})
         return httpx.Response(
-            200, json={"catalogue_version": 1, "skills": {"scan": {}}}
+            200, json={"skills": {"scan": {}}}
         )
 
     with fake_body(answer) as body:
         assert body.state()["inventory"] == {"bread": 2}
-        assert body.skills()["catalogue_version"] == 1
+        assert list(body.skills()["skills"]) == ["scan"]
+
+
+def test_run():
+    def answer(request):
+        assert request.url.path == "/run"
+        return httpx.Response(200, json={"run_id": "run-x", "purpose": "dev", "data_dir": "/d"})
+
+    with fake_body(answer) as body:
+        assert body.run()["run_id"] == "run-x"
 
 
 def test_execute_sends_the_full_request():
@@ -45,7 +54,10 @@ def test_execute_sends_the_full_request():
 
     with fake_body(answer) as body:
         result = body.execute(
-            "move_to", {"x": 1, "y": 2, "z": 3}, episode_id="ep-1", step=0
+            "move_to",
+            {"x": 1, "y": 2, "z": 3},
+            episode_id="ep-1",
+            turn=0,
         )
 
     assert result["reason"] == "ok"
@@ -55,7 +67,7 @@ def test_execute_sends_the_full_request():
         "args": {"x": 1, "y": 2, "z": 3},
         "source": "brain",
         "episode_id": "ep-1",
-        "step": 0,
+        "turn": 0,
     }
 
 

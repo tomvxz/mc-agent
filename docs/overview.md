@@ -14,7 +14,7 @@ One page to find your way. Details: `CLAUDE.md` (rules and roadmap), `docs/journ
  └──────────────────────┘                  └──────────────────────────────────┘
         │ data/dev/episodes.jsonl                  │ data/dev/transitions.jsonl
 ```
-The brain never talks to Minecraft; the body never decides anything.
+The brain never talks to Minecraft. The body handles reflexes and the details inside a skill; the brain chooses the plan.
 
 ## Follow one call (read these first)
 When the brain asks `mine(oak_log, 3)`:

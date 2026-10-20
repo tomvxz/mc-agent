@@ -1,7 +1,8 @@
 """The link between the brain (Python) and the body (the Node bot, see bot/src/api.js).
 
-The body exposes 3 HTTP routes; this module turns them into 3 Python methods:
+The body exposes 4 HTTP routes; this module turns them into 4 Python methods:
     state()                        -> the bot's observed state (position, health, inventory...)
+    run()                          -> the current run (run_id, purpose, data folder, versions)
     skills()                       -> the skill catalogue (descriptions, parameters, failure reasons)
     execute(name, args, ...)       -> runs ONE skill and returns {success, reason, details, duration}
 
@@ -79,8 +80,15 @@ class Body:
         return self._request("GET", "/state")
 
     def skills(self) -> dict[str, Any]:
-        """The catalogue: {catalogue_version, common_reasons, skills: {name: entry}}."""
+        """The catalogue shown to the LLM: {common_reasons, skills: {name: entry}}."""
         return self._request("GET", "/skills")
+
+    def run(self) -> dict[str, Any]:
+        """The body's current run: run_id, purpose (dev/collection), data_dir, versions...
+
+        Episodes must be written in data_dir, next to the run's transitions.
+        """
+        return self._request("GET", "/run")
 
     def execute(
         self,
@@ -89,19 +97,18 @@ class Body:
         *,
         source: str = "brain",
         episode_id: str | None = None,
-        step: int | None = None,
+        turn: int | None = None,
     ) -> dict[str, Any]:
         """Run a skill and return {success, reason, details, duration}.
 
-        episode_id and step link the transition (in data/transitions.jsonl) to the brain's episode.
+        episode_id and turn link the transition (in transitions.jsonl) to the brain's episode and
+        to the LLM turn whose plan contained this call. See docs/journal.md.
         An unknown skill name is not an exception: the result has reason="unknown_skill".
         """
         request: dict[str, Any] = {"name": name, "args": args or {}, "source": source}
         # Missing fields are not sent (the journal then leaves them out)
-        if episode_id is not None:
-            request["episode_id"] = episode_id
-        if step is not None:
-            request["step"] = step
+        optional = {"episode_id": episode_id, "turn": turn}
+        request.update({k: v for k, v in optional.items() if v is not None})
         return self._request("POST", "/execute", json=request, timeout=EXECUTE_TIMEOUT)
 
     def close(self) -> None:
@@ -148,9 +155,6 @@ class Body:
 if __name__ == "__main__":
     with Body() as body:
         catalogue = body.skills()
-        print(
-            "catalogue v%s:" % catalogue["catalogue_version"],
-            ", ".join(catalogue["skills"]),
-        )
+        print("skills:", ", ".join(catalogue["skills"]))
         print("state:", body.state())
         print("scan:", body.execute("scan", {"radius": 16}, source="manual_check"))

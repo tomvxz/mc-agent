@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "node --test \"tests/unit/*.test.js\"",
+    "test": "node --env-file=../.env --test \"tests/unit/*.test.js\"",
     "test:game": "node --env-file=../.env bot.js suite"
   },
   "keywords": [],

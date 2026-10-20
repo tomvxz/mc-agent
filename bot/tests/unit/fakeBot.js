@@ -3,7 +3,10 @@
 
 import { EventEmitter } from 'node:events'
 import minecraftData from 'minecraft-data'
-const registry = minecraftData('1.21.11')
+// The Minecraft version comes from .env (MC_VERSION), never written here: npm test reads ../.env
+const MC_VERSION = process.env.MC_VERSION
+if (!MC_VERSION) throw new Error('MC_VERSION is missing: run the tests with npm test (it reads ../.env)')
+const registry = minecraftData(MC_VERSION)
 
 // A minimal 3D point that mimics Mineflayer's Vec3
 class Point {
@@ -87,4 +90,4 @@ function fakeBot(options = {}) {
     })
 }
 
-export { fakeBot, Point }
+export { fakeBot, Point, MC_VERSION }

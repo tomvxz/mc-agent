@@ -246,7 +246,6 @@ program crashes mid-episode). Every event has:
   "scenario": "arena:trees_3",                // optional: the task setting
   "model": { "provider": "ollama", "name": "qwen3:8b", "params": { "temperature": 0.2, "seed": 42 } },
   "code_version": "6fc30a3",                  // the git commit (+dirty if uncommitted changes)
-  "prompt_version": 1,                        // version of brain/render.py (the texts the LLM reads)
   "system_prompt": "…",                       // sent once: it does not change during the episode
   "tools": [ … ],                             // tool definitions sent to the LLM (propose_plans)
   "max_turns": 10 }

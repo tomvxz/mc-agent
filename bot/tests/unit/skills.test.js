@@ -4,7 +4,7 @@ import assert from "node:assert";
 import test from "node:test";
 import prismarineRecipe from "prismarine-recipe";
 import skills from "../../src/skills/index.js";
-import { fakeBot, Point } from "./fakeBot.js";
+import { fakeBot, Point, MC_VERSION } from "./fakeBot.js";
 
 // Check success + reason
 async function expectResult(promise, success, reason) {
@@ -201,7 +201,7 @@ test("craft: arguments, unknown item, no recipe, ingredients, table", async () =
   ); // empty recipesAll
 
   // The real recipes of the game (prismarine-recipe), filtered like Mineflayer does
-  const { Recipe } = prismarineRecipe("1.21.11");
+  const { Recipe } = prismarineRecipe(MC_VERSION);
   const realRecipes = (id, meta, table) =>
     Recipe.find(id).filter((r) => !r.requiresTable || table);
 
@@ -226,7 +226,7 @@ test("craft: arguments, unknown item, no recipe, ingredients, table", async () =
 });
 
 test("craft: a failure says what the recipe needs (like the recipe book), variants merged", async () => {
-  const { Recipe } = prismarineRecipe("1.21.11");
+  const { Recipe } = prismarineRecipe(MC_VERSION);
   const bot = fakeBot();
   bot.recipesAll = (id, meta, table) =>
     Recipe.find(id).filter((r) => !r.requiresTable || table);
