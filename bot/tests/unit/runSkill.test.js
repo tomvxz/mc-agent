@@ -1,6 +1,7 @@
 import assert from "node:assert";
 import test from "node:test";
 import runSkill from "../../src/runSkill.js";
+import { sleep, waitUntil } from "../../src/skills/utils.js";
 import { fakeBot } from "./fakeBot.js";
 
 test("a successful skill keeps its result and gets a duration", async () => {
@@ -84,4 +85,39 @@ test("actions outside any skill (pathfinder loop, test setup) are never refused"
   await runSkill(bot, () => new Promise(() => {}), {}, 20); // a skill that times out
   await bot.pathfinder.goto(); // called from outside a skill: allowed
   assert.strictEqual(calls, 1);
+});
+
+test("at the time limit the keys are released (the bot does not keep walking)", async () => {
+  const bot = fakeBot();
+  const holdForward = async (b) => {
+    b.setControlState("forward", true);
+    await new Promise(() => {});
+  };
+  const r = await runSkill(bot, holdForward, {}, 30);
+  assert.strictEqual(r.reason, "timeout");
+  assert.deepStrictEqual(bot.controlState, {});
+});
+
+test("a stopped skill ends during its next wait (sleep / waitUntil), not only at its next action", async () => {
+  for (const wait of [() => waitUntil(() => false, 5000), () => sleep(5000)]) {
+    let endedAt = null;
+    const waiting = async () => {
+      try {
+        await wait();
+      } finally {
+        endedAt = Date.now();
+      }
+    };
+    const r = await runSkill(fakeBot(), waiting, {}, 50);
+    const stoppedAt = Date.now();
+    assert.strictEqual(r.reason, "timeout");
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    const after = endedAt === null ? "never" : `${endedAt - stoppedAt} ms`;
+    assert.ok(endedAt !== null && endedAt - stoppedAt < 150, `ended ${after} after the stop`);
+  }
+});
+
+test("outside a skill, sleep and waitUntil are plain waits", async () => {
+  await sleep(10);
+  assert.strictEqual(await waitUntil(() => true, 100), true);
 });
