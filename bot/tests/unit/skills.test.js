@@ -4,6 +4,7 @@ import assert from "node:assert";
 import test from "node:test";
 import prismarineRecipe from "prismarine-recipe";
 import skills from "../../src/skills/index.js";
+import { landingSpot } from "../../src/skills/utils.js";
 import { fakeBot, Point, MC_VERSION } from "./fakeBot.js";
 
 // Check success + reason
@@ -21,7 +22,7 @@ async function expectResult(promise, success, reason) {
   return r;
 }
 
-test("the skills of batch 1 (+ pick_up and collect_block, split out of break_block)", () => {
+test("the skills of batch 1 (+ pick_up and collect_block, split out of break_block, + recipe)", () => {
   assert.deepStrictEqual(Object.keys(skills).sort(), [
     "break_block",
     "collect_block",
@@ -33,6 +34,7 @@ test("the skills of batch 1 (+ pick_up and collect_block, split out of break_blo
     "move_to",
     "pick_up",
     "place_block",
+    "recipe",
     "scan",
   ]);
 });
@@ -51,26 +53,22 @@ test("move_to: invalid coordinates", async () => {
   );
 });
 
-test("move_to: a target inside a solid block fails at once with a small range", async () => {
+test("move_to: a target inside a solid block fails at once with an explicit small range", async () => {
   const bot = fakeBot({ blocks: { "10,100,0": "oak_log" } });
   let walked = false;
   bot.pathfinder.goto = async () => {
     walked = true;
   };
   const r = await expectResult(
-    skills.move_to(bot, { x: 10, y: 100, z: 0 }),
+    skills.move_to(bot, { x: 10, y: 100, z: 0, range: 1 }),
     false,
     "target_blocked",
   );
   assert.strictEqual(r.details.block, "oak_log");
   assert.strictEqual(walked, false);
-  // With range >= 2 the request is valid: go next to it
+  // With the default range (2) the request is valid: go next to it
   bot.entity.position = bot.entity.position.clone().set(8.5, 100, 0.5);
-  await expectResult(
-    skills.move_to(bot, { x: 10, y: 100, z: 0, range: 2 }),
-    true,
-    "ok",
-  );
+  await expectResult(skills.move_to(bot, { x: 10, y: 100, z: 0 }), true, "ok");
 });
 
 test("move_to: pathfinder errors are translated into reasons", async () => {
@@ -232,10 +230,10 @@ test("craft: a failure says what the recipe needs (like the recipe book), varian
     Recipe.find(id).filter((r) => !r.requiresTable || table);
   let r = await skills.craft(bot, { item: "wooden_pickaxe" });
   assert.strictEqual(r.details.needs_table, true);
-  assert.deepStrictEqual(r.details.ingredients.stick, {
-    required: 2,
-    owned: 0,
-  });
+  assert.deepStrictEqual(
+    [r.details.ingredients.stick.required, r.details.ingredients.stick.owned],
+    [2, 0],
+  );
   assert.strictEqual(r.details.ingredients.any_planks.required, 3); // any planks, not "cherry_planks"
   assert.ok(r.details.ingredients.any_planks.one_of.includes("oak_planks"));
 
@@ -243,10 +241,13 @@ test("craft: a failure says what the recipe needs (like the recipe book), varian
   const withOak = fakeBot({ inventory: { oak_planks: 3 } });
   withOak.recipesAll = bot.recipesAll;
   r = await skills.craft(withOak, { item: "wooden_pickaxe" });
-  assert.deepStrictEqual(r.details.ingredients, {
-    oak_planks: { required: 3, owned: 3 },
-    stick: { required: 2, owned: 0 },
-  });
+  assert.deepStrictEqual(Object.keys(r.details.ingredients).sort(), ["oak_planks", "stick"]);
+  assert.deepStrictEqual(
+    [r.details.ingredients.oak_planks.required, r.details.ingredients.oak_planks.owned],
+    [3, 3],
+  );
+  // Strictly one level: nothing about how to get the ingredients
+  assert.strictEqual(r.details.ingredients.stick.how, undefined);
 
   // Recipes without the usual fields: the reason stays right, the extra details are just left out
   const odd = fakeBot();
@@ -598,4 +599,38 @@ test("collect_block: the item fell out of reach -> not_collected", async () => {
     "not_collected",
   );
   assert.strictEqual(r.details.drops.length, 1);
+});
+
+const xyz = (p) => [p.x, p.y, p.z];
+
+test("landingSpot: a falling drop is aimed at where it will lie (on leaves too)", () => {
+  const bot = fakeBot({ blocks: { "3,96,4": "stone", "6,98,6": "oak_leaves" } });
+  // Fresh drop where a log was, 3 blocks above the ground: it lands on the stone
+  assert.deepStrictEqual(xyz(landingSpot(bot, new Point(3.4, 99.2, 4.6))), [3.4, 97, 4.6]);
+  // Leaves stop a falling item
+  assert.deepStrictEqual(xyz(landingSpot(bot, new Point(6.5, 101, 6.5))), [6.5, 99, 6.5]);
+  // Nothing below within 16 blocks: aim where it is
+  assert.deepStrictEqual(xyz(landingSpot(bot, new Point(20.5, 100, 20.5))), [20.5, 100, 20.5]);
+});
+
+test("recipe: one level only, the LLM asks again for an ingredient", async () => {
+  const { Recipe } = prismarineRecipe(MC_VERSION);
+  const bot = fakeBot();
+  bot.recipesAll = (id, meta, table) => Recipe.find(id).filter((r) => !r.requiresTable || table);
+  const r = await expectResult(skills.recipe(bot, { item: "crafting_table" }), true, "ok");
+  assert.deepStrictEqual([r.details.needs_table, r.details.makes], [false, 1]);
+  assert.deepStrictEqual(Object.keys(r.details.ingredients), ["any_planks"]);
+  const planks = r.details.ingredients.any_planks;
+  assert.deepStrictEqual([planks.required, planks.owned], [4, 0]);
+  assert.ok(planks.one_of.includes("birch_planks") && planks.one_of.includes("oak_planks"));
+  assert.strictEqual(planks.how, undefined); // nothing about logs here
+  // The next level, when asked
+  const next = await expectResult(skills.recipe(bot, { item: "birch_planks" }), true, "ok");
+  assert.deepStrictEqual(next.details.ingredients, { birch_log: { required: 1, owned: 0 } });
+  assert.strictEqual(next.details.makes, 4);
+  // A log is gathered, not crafted
+  await expectResult(skills.recipe(bot, { item: "birch_log" }), false, "no_recipe");
+  // The failures decided before anything else
+  await expectResult(skills.recipe(bot, {}), false, "invalid_args");
+  await expectResult(skills.recipe(bot, { item: "no_such_item" }), false, "unknown_item");
 });

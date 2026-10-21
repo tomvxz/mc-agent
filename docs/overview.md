@@ -54,6 +54,7 @@ On the Python side, `brain/agent.py` is the loop: state -> prompt -> LLM -> plan
 | `collect_block(x, y, z)` | yes | break one block AND pick up what drops (break_block + pick_up) |
 | `mine(block, count)` | yes | gather blocks of a type: find + collect_block, repeated |
 | `craft(item, count)` | yes | craft an item (needs a crafting table nearby for most recipes) |
+| `recipe(item)` | yes | question: how an item is crafted, one level (ingredients, how to get each) |
 | `place_block(item, x, y, z)` | yes | place a block from the inventory |
 | `explore(direction, distance)` | yes | go somewhere new when nothing is found |
 | `break_block(x, y, z)` | no (for now) | break one block, only that (reports what fell) |

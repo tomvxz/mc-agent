@@ -176,15 +176,39 @@ async function dropsNear(bot, p, waitMs = 1000) {
     }));
 }
 
+// Where an item will lie: on top of the first solid block below it (leaves included). A fresh drop
+// appears where the block was and falls for about a second, and the server sends the position of
+// an item only about once per second: aiming at where it is now can be 3 blocks too high.
+function landingSpot(bot, p) {
+    for (let y = Math.floor(p.y); y > Math.floor(p.y) - 16; y--) {
+        const below = bot.blockAt(p.clone().set(Math.floor(p.x), y, Math.floor(p.z)));
+        if (below && below.boundingBox === "block") return p.clone().set(p.x, y + 1, p.z);
+    }
+    return p.clone();
+}
+
 // Walk onto an item lying on the ground until the game picks it up. Returns true if picked up.
 // Throws the movement error if the item cannot be reached.
+// The target can MOVE (seen: the bot kept aiming at a log's old position, 3 blocks up, while the
+// drop fell, and gave up): aim at where it lands, and aim again once if it moved during the walk.
 async function walkOnto(bot, entity) {
     const pickedUp = () => !bot.entities[entity.id]; // picked up = the entity disappears
-    // Get within 1 block (pickup works at that distance; aiming for 0 makes the pathfinder break
-    // the blocks above to stand there)
-    const o = entity.position;
-    await gotoWatched(bot, new goals.GoalNear(o.x, o.y, o.z, 1));
-    if (await waitUntil(pickedUp, 700)) return true; // 700 ms: a fresh item cannot be picked up for 0.5 s
+    for (let attempt = 0; attempt < 2; attempt++) {
+        if (pickedUp()) return true; // e.g. on the way to the previous item
+        // Get within 1 block (pickup works at that distance; aiming for 0 makes the pathfinder
+        // break the blocks above to stand there)
+        const o = landingSpot(bot, entity.position);
+        const moved = () => pickedUp() || landingSpot(bot, entity.position).distanceTo(o) > 1;
+        try {
+            await gotoWatched(bot, new goals.GoalNear(o.x, o.y, o.z, 1));
+        } catch (e) {
+            if (attempt === 0 && moved()) continue; // it moved: aim again
+            throw e;
+        }
+        if (await waitUntil(pickedUp, 700)) return true; // 700 ms: a fresh item cannot be picked up for 0.5 s
+        if (!moved()) break; // it did not move: walking again would not help
+    }
+    if (pickedUp()) return true;
     // Still there: look at it and walk straight towards it (at most 1 s)
     await bot.lookAt(entity.position, true);
     bot.setControlState("forward", true);
@@ -206,5 +230,6 @@ export {
     sleep,
     trackWorldChanges,
     waitUntil,
+    landingSpot,
     walkOnto,
 };

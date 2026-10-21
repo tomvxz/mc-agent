@@ -29,6 +29,7 @@ Rules:
 - To get blocks of a type (wood, stone...), use mine(block, count): it finds them itself (no find
   needed before), walks there, breaks them and picks up the items on its own. collect_block is only
   for one block whose exact position you have already seen.
+- To know how to craft an item and what it needs, use recipe (ask again for an ingredient).
 - For anything else you have not located yet, use find. If find answers not_found (or mine
   answers block_not_found), use explore, then try again.
 - Do not repeat a call that just failed in the same way: read its reason and change your calls.

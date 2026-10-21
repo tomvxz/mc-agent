@@ -3,7 +3,7 @@
 import { brokenAndCollected, commonEdgeCases, nominalCases, topOfColumn } from "./break_block.js";
 
 const nominal = nominalCases(brokenAndCollected);
-const edgeCases = [topOfColumn("not_collected"), ...commonEdgeCases];
+const edgeCases = [topOfColumn("no_path"), ...commonEdgeCases];
 
 export const skill = "collect_block";
 export { edgeCases, nominal };

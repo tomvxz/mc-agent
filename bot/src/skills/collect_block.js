@@ -12,7 +12,7 @@ async function collect_block(bot, args = {}) {
     if (!broken.success) return broken;
 
     // 2. Pick up what fell (by type; a drop of unknown type: pick up everything around)
-    const { position, block, drops } = broken.details;
+    const { position, block, drops, cleared } = broken.details;
     const names = [...new Set(drops.map((d) => d.name))];
     for (const name of names)
         await pick_up(bot, name === null ? {} : { item: name });
@@ -23,6 +23,7 @@ async function collect_block(bot, args = {}) {
         block,
         drops,
         collected: gainedSince(bot, before),
+        ...(cleared && { cleared }), // blocks broken only to see the target (break_block)
     };
     if (drops.length > 0 && Object.keys(details.collected).length === 0) {
         return { success: false, reason: "not_collected", details };

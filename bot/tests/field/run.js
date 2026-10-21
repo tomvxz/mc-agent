@@ -1,7 +1,8 @@
 // Field bench: measure the skills in the REAL world, not in the arena.
 // Usage: node --env-file=../.env bot.js field [locations=30] [seed=1] [only=index]
 //
-// The bot is sent to random natural locations (always the same ones for a given seed) and does
+// The bot is sent to random natural locations (always the same ones for a given seed; one without
+// safe ground, e.g. ocean, is replaced by the next draw) and does
 // the same simple tasks at each: place a block, walk 20-40 blocks, gather 3 logs, explore.
 // The report gives the success rate and, above all, WHY the failures happened: we fix the most
 // frequent cause first, then run the same seed again to compare. Hand-made arena cases only
@@ -99,26 +100,40 @@ const TASKS = [
     { name: "explore", args: (bot, loc) => ({ direction: loc.exploreDirection, distance: 32 }) },
 ];
 
+// A location without safe ground (ocean, lava) is replaced by the next one, up to MAX_TRIES * n draws.
+// The first draws of a seed do not depend on n: the locations already played stay the same.
+const MAX_TRIES = 3;
+
 // Send the bot to a location, clean (empty inventory except 16 dirt, day, clear weather)
 async function goToLocation(bot, loc) {
-    const r = await setupPlace(bot, { x: loc.x, z: loc.z, inventory: { dirt: 16 } });
-    return r.success;
+    return setupPlace(bot, { x: loc.x, z: loc.z, inventory: { dirt: 16 } });
 }
 
 async function runField(bot, n, seed, only) {
-    const locations = drawLocations(seed, n).filter((l) => only === null || l.index === only);
-    console.log(`\n=== Field bench: ${locations.length} location(s), seed ${seed} ===`);
+    const wanted = only === null ? n : 1;
+    const candidates =
+        only === null ? drawLocations(seed, MAX_TRIES * n) : drawLocations(seed, only + 1).slice(only);
+    console.log(`\n=== Field bench: ${wanted} location(s), seed ${seed} ===`);
     const trials = [];
+    let played = 0;
+    let replaced = 0;
 
     // Count the server's position corrections during each skill (see "correction" in src/trace.js)
     let corrections = 0;
     bot.on("forcedMove", () => corrections++);
 
-    for (const loc of locations) {
-        if (!(await goToLocation(bot, loc))) {
-            console.log(`[${loc.index}] (${loc.x}, ${loc.z}): could not get there, skipped`);
+    for (const loc of candidates) {
+        if (played === wanted) break;
+        const setup = await goToLocation(bot, loc);
+        if (!setup.success) {
+            replaced++;
+            console.log(
+                `[${loc.index}] (${loc.x}, ${loc.z}): could not get there, replaced by the next location` +
+                    ` (${setup.details.server_answer || setup.reason})`,
+            );
             continue;
         }
+        played++;
         const p = bot.entity.position;
         const ground = at(bot, Math.floor(p.x), Math.floor(p.y) - 1, Math.floor(p.z));
         console.log(
@@ -153,7 +168,8 @@ async function runField(bot, n, seed, only) {
         }
     }
 
-    console.log("\n=== Summary (per task) ===");
+    if (played < wanted) console.log(`\nonly ${played} of ${wanted} locations could be set up`);
+    console.log(`\n=== Summary (per task), ${played} location(s), ${replaced} replaced ===`);
     for (const [task, s] of Object.entries(summarize(trials))) {
         const reasons = Object.entries(s.reasons)
             .sort((a, b) => b[1] - a[1])

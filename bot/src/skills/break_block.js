@@ -90,7 +90,11 @@ async function getInView(bot, target, ready) {
                 bot.canDigBlock(hit),
         );
         if (!hider) break;
-        await bot.dig(hider);
+        try {
+            await bot.dig(hider);
+        } catch (e) {
+            break; // e.g. "Digging aborted": stop clearing, the dig of the target says if it worked
+        }
         cleared++;
     }
     if (cleared > 0 && !ready()) {

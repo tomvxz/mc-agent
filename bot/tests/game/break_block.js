@@ -62,16 +62,23 @@ const nominal = nominalCases(broken);
 
 const P = [C.x + 3, C.y, C.z];
 const H = [C.x - 4, C.y + 3, C.z + 2];
-// The item falls back ONTO the column, out of reach: break_block -> ok, collect_block -> not_collected
+// A log on a barrier platform (3x3, under it) on a barrier column: no face of the log can be seen
+// from anywhere the bot can stand, and nothing around it can be broken -> no_path, honestly.
+// (This case used to test not_collected: "the item falls back onto the column". It never was
+// deterministic: on a 1-wide column the item sometimes bounced off to the ground, and with
+// breakable blocks the bot dug its way up. not_collected has no arena case for now.)
 const topOfColumn = (expect) => ({
-    name: "top of a column (item out of reach)",
-    setup: (bot) =>
-        placeAndWait(
+    name: "log on an unbreakable platform, no viewpoint",
+    setup: async (bot) => {
+        await placeAndWait(
             bot,
-            `/fill ${H[0]} ${C.y} ${H[2]} ${H[0]} ${H[1]} ${H[2]} oak_log`,
-            H,
-            "oak_log",
-        ),
+            `/fill ${H[0] - 1} ${H[1] - 1} ${H[2] - 1} ${H[0] + 1} ${H[1] - 1} ${H[2] + 1} barrier`,
+            [H[0] + 1, H[1] - 1, H[2] + 1],
+            "barrier",
+        );
+        await placeAndWait(bot, `/fill ${H[0]} ${C.y} ${H[2]} ${H[0]} ${H[1] - 1} ${H[2]} barrier`, [H[0], C.y, H[2]], "barrier");
+        await placeAndWait(bot, `/setblock ${H[0]} ${H[1]} ${H[2]} oak_log`, H, "oak_log");
+    },
     args: { x: H[0], y: H[1], z: H[2] },
     expect,
 });
@@ -96,7 +103,7 @@ const commonEdgeCases = [
     },
 ];
 
-const edgeCases = [topOfColumn("ok"), ...commonEdgeCases];
+const edgeCases = [topOfColumn("no_path"), ...commonEdgeCases];
 
 export const skill = "break_block";
 export { brokenAndCollected, commonEdgeCases, edgeCases, nominal, nominalCases, topOfColumn };

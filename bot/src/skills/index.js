@@ -8,6 +8,7 @@ import mine from "./mine.js";
 import move_to from "./move_to.js";
 import pick_up from "./pick_up.js";
 import place_block from "./place_block.js";
+import recipe from "./recipe.js";
 import scan from "./scan.js";
 
 // The skill catalogue. NAMES are stable: they are inputs of the world model.
@@ -22,6 +23,7 @@ export default {
   // Questions (change nothing in the world)
   find,
   scan,
+  recipe,
   // Moving to discover new places
   explore,
   // Shortcuts (assemblies of primitives)

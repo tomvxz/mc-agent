@@ -28,6 +28,7 @@ async function mine(bot, { block, count = 1 } = {}) {
     const tried = new Set(); // positions already attempted, so the same block is never targeted twice
     let dug = 0;
     let unreachable = 0;
+    let cleared = 0; // blocks broken only to see a target (leaves...): what the trip cost
 
     while (dug < count) {
         // 2. The nearest block not tried yet
@@ -66,6 +67,7 @@ async function mine(bot, { block, count = 1 } = {}) {
             y: target.y,
             z: target.z,
         });
+        cleared += r.details.cleared || 0;
         if (r.success) {
             dug++;
         } else if (TRY_ANOTHER.includes(r.reason)) {
@@ -89,12 +91,12 @@ async function mine(bot, { block, count = 1 } = {}) {
         return {
             success: false,
             reason: "not_collected",
-            details: { dug, collected: gainedSince(bot, before) },
+            details: { dug, collected: gainedSince(bot, before), ...(cleared && { cleared }) },
         };
     return {
         success: true,
         reason: "ok",
-        details: { dug, collected: gainedSince(bot, before), unreachable },
+        details: { dug, collected: gainedSince(bot, before), unreachable, ...(cleared && { cleared }) },
     };
 }
 

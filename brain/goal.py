@@ -14,6 +14,8 @@ Item names are not checked against the game's list: a wrong name (oak_logs) is n
 
 from typing import Any
 
+from brain.llm import as_declared
+
 DEFINE_GOAL = "define_goal"
 
 Condition = dict[str, Any]
@@ -29,7 +31,11 @@ def parse_condition(
         return None, f"no {DEFINE_GOAL} call in the answer"
     have: dict[str, int] = {}
     for call in calls:
-        item, count = call["args"].get("item"), call["args"].get("count", 1)
+        # as_declared: "3" -> 3 here too, so that rereading a raw answer (show.py) gives the same condition
+        item, count = (
+            call["args"].get("item"),
+            as_declared(call["args"].get("count", 1), "integer"),
+        )
         if item in (None, ""):
             continue  # not about items
         if (

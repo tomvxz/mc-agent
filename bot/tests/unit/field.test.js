@@ -10,6 +10,8 @@ test("field bench: the same seed always gives the same locations", () => {
         drawLocations(7, 5)[3],
         drawLocations(7, 5).filter((l) => l.index === 3)[0],
     );
+    // Replacements (for locations without safe ground) come after: the first draws do not change
+    assert.deepStrictEqual(drawLocations(7, 15).slice(0, 5), drawLocations(7, 5));
     const r = makeRandom(1);
     for (let i = 0; i < 100; i++) {
         const v = r();

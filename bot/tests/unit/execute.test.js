@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import execute from "../../src/execute.js";
+import execute, { inventoryChange } from "../../src/execute.js";
 import { observe, trackDeaths } from "../../src/state.js";
 import { fakeBot } from "./fakeBot.js";
 
@@ -223,4 +223,11 @@ test("the state counts deaths (trackDeaths)", async () => {
   trackDeaths(bot);
   bot.emit("death");
   assert.strictEqual(observe(bot).deaths, 1);
+});
+
+test("a timeout tells the brain what changed in the inventory (computed, not logged)", () => {
+  const before = { inventory: { oak_log: 4, dirt: 2 } };
+  const after = { inventory: { oak_log: 12, bamboo: 69 } };
+  assert.deepStrictEqual(inventoryChange(before, after), { oak_log: 8, dirt: -2, bamboo: 69 });
+  assert.deepStrictEqual(inventoryChange(null, after), { oak_log: 12, bamboo: 69 });
 });

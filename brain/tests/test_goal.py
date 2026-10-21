@@ -22,6 +22,7 @@ def call(**args):
 def test_the_condition_is_read_from_the_define_goal_calls():
     assert goals.parse_condition([call(item="oak_log", count=3)]) == ({"have": {"oak_log": 3}}, None)
     assert goals.parse_condition([call(item="crafting_table")]) == ({"have": {"crafting_table": 1}}, None)
+    assert goals.parse_condition([call(item="oak_log", count="3")]) == ({"have": {"oak_log": 3}}, None)  # llama3.1
     both = [call(item="oak_log", count=3), call(item="stick", count=2)]  # one call per item
     assert goals.parse_condition(both) == ({"have": {"oak_log": 3, "stick": 2}}, None)
     assert goals.parse_condition([call()]) == (None, None)  # not about items: no condition, no error

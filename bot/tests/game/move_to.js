@@ -15,7 +15,7 @@ const blockAt = (bot, x, y, z) => bot.blockAt(bot.entity.position.clone().set(x,
 
 // The check does not take the skill's word for it: it measures the real distance
 const arrivedAt =
-    (target, range = 1) =>
+    (target, range = 2) => // the skill's default range
     (r, before, after, bot) => {
         const d = bot.entity.position.distanceTo(bot.entity.position.clone().set(...target));
         return d <= range + 1 || `real distance ${d.toFixed(1)}`;
@@ -164,11 +164,11 @@ nominal.push(
     },
 );
 
-// Next to a tree (range 2), through its leaves
+// Next to a tree (the default range, 2), through its leaves: the target is the log itself
 nominal.push({
-    name: "next to a built oak (range 2)",
+    name: "next to a built oak (default range)",
     setup: (bot) => buildOak(bot, 7, 7),
-    args: { x: C.x + 7, y: C.y, z: C.z + 7, range: 2 },
+    args: { x: C.x + 7, y: C.y, z: C.z + 7 },
     verify: arrivedAt([C.x + 7, C.y, C.z + 7], 2),
 });
 
@@ -182,7 +182,9 @@ const edgeCases = [
                 [C.x + 11, C.y + 2, C.z - 9],
                 "barrier",
             ),
-        args: { x: C.x + 10, y: C.y, z: C.z - 10 },
+        // range 1: the exact spot is unreachable (with the default range 2, standing outside the
+        // enclosure is close enough, and that is a success)
+        args: { x: C.x + 10, y: C.y, z: C.z - 10, range: 1 },
         expect: "no_path",
     },
     {
@@ -203,7 +205,7 @@ const edgeCases = [
     {
         name: "target inside a log with range 1: target_blocked at once",
         setup: (bot) => buildOak(bot, 7, 7),
-        args: { x: C.x + 7, y: C.y, z: C.z + 7 },
+        args: { x: C.x + 7, y: C.y, z: C.z + 7, range: 1 },
         expect: "target_blocked",
     },
     { name: "invalid arguments", args: { x: "far" }, expect: "invalid_args" },

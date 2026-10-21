@@ -64,7 +64,17 @@ branché sur le VRAI jeu via Mineflayer. Projet d'apprentissage : l'utilisateur 
   - Raccourcis (macros) pour l'efficacité : `collect_block(x,y,z)` = break_block + pick_up, `mine(block,count)` = find + collect_block répétés. `flee` = `find(hostile)` + `move_to` : pas de raccourci pour l'instant.
     Un raccourci est un assemblage de primitives (ex. mine = find + collect_block), pas un code à part.
     Un raccourci évite au LLM d'enchaîner des primitives trivialement cumulables (ex. casser puis ramasser).
-- Compétences "questions" (sans effet sur le monde) : `find(bloc|entité)` et `scan`, pour que le LLM sache où sont les ressources.
+- Compétences "questions" (sans effet sur le monde) : `find(bloc|entité)` et `scan`, pour que le LLM sache où sont les ressources,
+  et `recipe(item)` (une page du livre de recettes, STRICTEMENT un niveau : ingrédients, quantité produite, table ;
+  rien sur la façon d'obtenir les ingrédients : le LLM redemande, `no_recipe` = ça se récolte). Essayé puis retiré :
+  un champ `how` par ingrédient et le choix du « bois utile » d'après les arbres proches, qui répondaient à la
+  question suivante avant qu'elle soit posée (le corps faisait lui-même le lien bûche -> planches).
+  Les recettes sont des FAITS du jeu, pas des décisions : les donner n'est pas tricher (un joueur a le livre de
+  recettes et le wiki), c'est un réglage ; mais une question = une réponse, sans raisonnement caché du corps.
+  Aujourd'hui toutes les recettes (données de Mineflayer, liées à MC_VERSION) ; plus tard, la mémoire filtrera
+  les recettes à celles que l'agent a rencontrées (mode « débloquées », comme le livre du jeu) et on mesurera
+  all / débloquées / aucune au banc (voir Pistes, Mémoire). Les faits du jeu viennent de Mineflayer ; la mémoire
+  garde ce que l'agent SAIT (son expérience), jamais une copie des données du jeu.
 - Le LLM ne voit qu'une partie des compétences (`SHOWN_TO_LLM`) : un petit modèle choisit mieux parmi peu d'options.
   Les textes montrés au LLM ne doivent pas renvoyer vers une compétence cachée.
 - Toujours avoir `explore(direction, distance)` : sinon `block_not_found` bloque le LLM.
@@ -74,6 +84,21 @@ branché sur le VRAI jeu via Mineflayer. Projet d'apprentissage : l'utilisateur 
 - Ne pas écrire de primitive trop restrictive (ex. `place` "à côté du bot") : utiliser des coordonnées dès le départ.
 - Chaque compétence vérifie ses prérequis et renvoie une raison explicite
   (`missing_ingredients`, `no_tool`, `block_not_found`, `no_path`, `timeout`...) que le LLM peut exploiter.
+- Qui gère un imprévu ? La COMPÉTENCE si c'est (1) dans sa promesse (collect_block = casser ET ramasser),
+  (2) sans vrai choix dépendant du but (un joueur compétent n'y réfléchirait pas), (3) local, court et borné.
+  La TACTIQUE (`recovery.py`) pour une réaction connue à un échec, écrite en suite de primitives. Le LLM dès qu'il
+  y a un arbitrage ou des conséquences (dépenser, casser du précieux, risquer, choisir entre options).
+  Ce que la compétence fait en plus se VOIT dans `details` et reste borné.
+- Une politique générale, pas une règle par situation : ce qui peut être cassé en passant, ce qui est dangereux,
+  vit une seule fois dans `movements.js` et toutes les compétences en héritent. Chercher la cause générale
+  (ex. `not_collected` : pas « les feuilles », mais une cible qui BOUGE -> viser où l'objet atterrit).
+  Seules exceptions : quelques instincts de sécurité (lave, chutes).
+- Partage avec les têtes apprises de l'architecture hybride : le corps EXÉCUTE la mécanique (comment), le world
+  model et les autres têtes CHOISISSENT (quand, quoi, quelle réaction). Les frictions de bas niveau se corrigent
+  dans les compétences, pas en attendant un modèle plus fort : des compétences fiables rendent tous les modèles
+  meilleurs, et donnent des données propres aux têtes apprises.
+- Paramètres par défaut pensés pour le cas courant : `move_to` range 2 (on veut rarement être pile sur un bloc ;
+  une cible pleine = s'arrêter à côté) ; la précision reste possible (range 0 ou 1).
 - Contrôle d'expressivité : une liste de tâches variées (abri 3x3, planter du blé, tuer et cuire une vache,
   ranger dans un coffre, traverser un ravin) doit pouvoir s'écrire comme suite de primitives.
   Une tâche inexprimable = il manque une primitive.
@@ -164,10 +189,47 @@ branché sur le VRAI jeu via Mineflayer. Projet d'apprentissage : l'utilisateur 
     lot 2 : attack, equip, use_item, container, smelt, wait]
 6. Agent LLM baseline avec le champ `missing_capability` ; mesurer où il échoue.
    Le LLM prend directement les sorties de Node (pas encore de world model) : c'est la baseline de l'étape 8.
+   [en cours : banc d'épisodes, condition de but ; tâches plus longues à ajouter (crafting_table, pioche)]
 7. World model supervisé sur le journal.
 8. Brancher le world model comme filtre, test A/B (avec/sans), et comparer petit/gros modèle.
-Après l'étape 8 seulement : macros enregistrées par le LLM, planificateur sur le world model
-(moins d'appels LLM), multi-bots, éventuellement RL sur un comportement qui plafonne.
+
+### Pistes au-delà de l'étape 8 (projet long : liste OUVERTE, l'ordre est décidé par les mesures)
+Règle commune : un composant à la fois, mesuré avec/sans sur les bancs ; un composant appris s'AJOUTE (comprendre,
+prédire, choisir) et ne remplace pas une compétence déterministe fiable. Les idées ci-dessous sont des directions,
+pas des engagements ; en ajouter, en retirer selon ce que montrent les données.
+- Autonomie :
+  - déclencheurs (faim, santé, inventaire plein, monstre) : un réflexe Node interrompt la compétence et réveille le
+    cerveau avec un message d'alerte ;
+  - générateur de buts à priorités type pyramide de Maslow (survivre > manger > s'abriter > s'outiller > explorer),
+    écrit en DONNÉES/règles dont le LLM se sert ; but long terme (« un château ») gardé en mémoire.
+- Mémoire, par étapes :
+  - historique résumé par le code, puis prompt = vue construite (voir « Architecture cognitive ») ;
+  - mémoire de faits tenue par le code (lieux, coffres et contenu, zones explorées), mise à jour automatiquement
+    depuis les résultats des compétences ;
+  - plus tard : graphe de faits (GraphRAG : base -> coffre -> contenu -> position), base vectorielle pour les
+    souvenirs et leçons, mémoire gérée par le LLM (type MemGPT : outils remember/recall) avec un modèle assez fort,
+    « compression du soir » (un LLM relit le journal du jour et écrit des leçons, type Reflexion) ;
+  - récupération d'expériences passées (plans réussis pour un but proche), précurseur des macros ;
+  - connaissance du jeu filtrée par l'expérience : recettes « débloquées » (vues ou fabriquées) au lieu de toutes,
+    pour mesurer ce que le livre de recettes complet apporte (réglage all / débloquées / aucune).
+- Apprentissage sur le journal (données de COLLECTE uniquement, jamais dev) :
+  - têtes supervisées (succès, durée, danger, delta d'inventaire) = étape 7, comparées aux baselines triviales ;
+  - réétiquetage a posteriori (hindsight, cf. STEVE-1) : étiqueter un épisode par ce qu'il a VRAIMENT accompli ;
+  - labeling : décrire les changements (deltas) en phrases, par gabarits puis paraphrases d'un LLM local, pour
+    obtenir des paires (texte, changement) ; contrôler un échantillon à la main ;
+  - alignement contrastif texte <-> changement (InfoNCE, encodeur de texte pré-entraîné figé + encodeur d'état
+    appris) : la voie vers l'espace latent partagé ; la paire porte sur le CHANGEMENT, pas l'état final ; comparé
+    à la baseline symbolique `define_goal` ;
+  - encodeur d'état partagé, puis prédiction dans l'espace latent (JEPA : encodeur cible à mise à jour lente,
+    surveiller l'effondrement) quand l'état grossit (grandes grilles, pixels) ;
+  - fine-tuning (LoRA) du petit LLM sur des épisodes réussis, distillation depuis un gros modèle ; A/B avec le
+    world model et les deux ensemble.
+- Données : mélanger épisodes LLM, curriculums scriptés (bancs), exploration au hasard (un bot purement aléatoire
+  n'atteint pas les états intéressants) ; plusieurs bots en parallèle ; compter ~300 transitions/heure/bot.
+- Planification : macros enregistrées par le LLM (DONNÉES, mini-langage si besoin), planificateur sur le world
+  model (moins d'appels LLM), contrôleur appris pour la tactique.
+- Plus tard encore : multi-bots et rôles, voix, pixels (JEPA visuel ; politique type STEVE-1 comme UNE compétence
+  de plus, `act(consigne)`, enveloppée comme les autres), RL sur un comportement qui plafonne.
 
 ## État actuel et prochaines étapes (mettre à jour en fin de session)
 - Méthode décidée : mesurer les primitives sur le BANC TERRAIN (`bot.js field`, lieux naturels, même graine pour
@@ -179,15 +241,25 @@ Après l'étape 8 seulement : macros enregistrées par le LLM, planificateur sur
 - Conception à 3 niveaux sur les mêmes primitives : réflexes dans Node (à l'intérieur d'une compétence, au tick),
   tactique après un échec (d'abord des RÈGLES écrites dans `brain/recovery.py`, suites de primitives sous forme de
   DONNÉES ; plus tard choisies par le world model, éventuellement un petit modèle appris), stratégie = le LLM.
+- Banc d'épisodes (`brain/bench.py`) en place : succès vérifié sur l'état, lieux toujours neufs (le monde est
+  persistant : un lieu rejoué a perdu ses arbres), `--compare`. oak_logs (3 lieux, seed 1, 20/10/2026) :
+  llama3.1:8b 3/3 (1-2 tours, choisit `mine`) ; qwen2.5:3b 3/3 avec condition (2, 2, 8 tours), 3/3 sans (3, 7, 7).
+  Trop peu de lieux pour conclure ; la tâche n'est plus discriminante.
+- Corrigé cette session : nombres écrits en texte par Llama ("3"), condition de but (`goal.py`), `move_to` range 2
+  par défaut, ramassage qui vise où l'objet ATTERRIT (`landingSpot` : cause de `not_collected`), "Digging aborted"
+  en `dig_failed`, `cleared` remonté par collect_block et mine. Arène : move_to, break_block, collect_block,
+  pick_up, mine passent ; `not_collected` n'a plus de cas d'arène (aucun montage déterministe trouvé).
 - Prochaines étapes, dans l'ordre :
-  1. Corriger le banc terrain (lieux inaccessibles à remplacer, case libre pour place_block), puis 50 lieux sur une
-     nouvelle graine.
-  2. Options de stratégie pour `move_to`/`explore` (`dig`, `build`, `max_drop`, `avoid_water`), primitive courte
-     `step(direction, count)` (sans pathfinder, saute 1 bloc, s'arrête sur wall/drop/hazard/water), réflexe de
-     déblocage générique.
-  3. `brain/recovery.py` (règles), mesuré sur le banc avec/sans.
-  4. Relancer des épisodes LLM (« collect 3 oak logs », « craft a wooden pickaxe »).
-- L'utilisateur relit le code (ordre : `docs/overview.md`) ; rien n'est commité depuis `6fc30a3` : proposer un commit.
+  1. Banc terrain : remplacer les lieux inaccessibles (graine 2 : 6 lieux sur 10 sautés, océans) comme le banc
+     d'épisodes, case libre pour place_block, puis 50 lieux sur une nouvelle graine.
+  2. Tâches plus longues au banc d'épisodes (crafting_table, wooden_pickaxe), ~10 lieux par variante.
+  3. Options de stratégie pour `move_to`/`explore` (`dig`, `build`, `max_drop`, `avoid_water`), primitive courte
+     `step(direction, count)`, réflexe de déblocage générique.
+  4. `brain/recovery.py` (règles), mesuré sur le banc avec/sans.
+  Petites corrections en attente : `max_tokens` pour borner une réponse qui s'emballe (vu : qwen > 5 min) ;
+  `context_length` non enregistré quand Ollama n'a pas encore chargé le modèle.
+- Le script de rejeu d'un moment de décision (plusieurs graines, sans le jeu) est dans le scratchpad : à intégrer
+  à `brain/` si on en refait l'usage.
 
 ## Pièges pratiques
 - Le bot de l'utilisateur (`bot.js serve`) et celui des tests s'appellent tous deux `Agent` : avant une suite ou le banc,

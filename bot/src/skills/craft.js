@@ -2,8 +2,13 @@ import move_to from "./move_to.js";
 import { waitUntil } from "./utils.js";
 
 // What a recipe needs, like the game's recipe book shows it to a player: for the recipe(s) the bot
-// is closest to being able to make, each ingredient's required and owned count, and whether a
-// crafting table is needed. It tells what is missing, not how to get it (that is the LLM's job).
+// is closest to being able to make, each ingredient's required and owned count, how many items one
+// craft makes, and whether a crafting table is needed. STRICTLY ONE LEVEL: what X needs, never how
+// to get the ingredients (the LLM asks recipe again for an ingredient). Tried and removed: a `how`
+// per ingredient, and showing only the planks of the wood around; both answered the next question
+// before it was asked (the body itself linked logs -> planks).
+// For now every recipe is known (Mineflayer's data); later a memory may filter them to the ones the
+// agent has met (see CLAUDE.md, Mémoire).
 // Many recipes accept variants (any planks for a pickaxe): equivalent recipes are merged into one
 // ingredient like any_planks: { required: 3, owned: 0, one_of: ['oak_planks', ...] }.
 function recipeNeeds(bot, info, count) {
@@ -31,17 +36,20 @@ function describeNeeds(bot, info, count) {
         options.push({
             missing,
             needs_table: !!recipe.requiresTable,
+            makes: recipe.result.count,
             ingredients,
         });
     }
     if (options.length === 0) return {};
     const least = Math.min(...options.map((o) => o.missing));
     const best = options.filter((o) => o.missing === least);
-    if (best.length === 1)
+    if (best.length === 1) {
         return {
             needs_table: best[0].needs_table,
+            makes: best[0].makes,
             ingredients: best[0].ingredients,
         };
+    }
 
     // Several equally close recipes: keep what they share, merge what varies (e.g. the planks type)
     const shared = Object.keys(best[0].ingredients).filter((n) =>
@@ -67,7 +75,7 @@ function describeNeeds(bot, info, count) {
     }
     for (const group of Object.values(variants))
         ingredients[variantKey(group.one_of)] = group;
-    return { needs_table: best.every((o) => o.needs_table), ingredients };
+    return { needs_table: best.every((o) => o.needs_table), makes: best[0].makes, ingredients };
 }
 
 // "any_planks" for [oak_planks, spruce_planks, ...]: named after the most common last word
@@ -167,3 +175,4 @@ async function craft(bot, { item, count = 1 } = {}) {
 }
 
 export default craft;
+export { recipeNeeds };

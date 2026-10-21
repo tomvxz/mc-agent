@@ -10,7 +10,9 @@ const { goals } = mineflayerPathfinder;
 
 // Go to a position. The pathfinder deals with obstacles on its own (see src/movements.js):
 // it jumps, digs a passage, pillars up with dirt, avoids lava.
-async function move_to(bot, { x, y, z, range = 1 } = {}) {
+// range 2 by default: the LLM rarely wants to stand exactly on a block, and a target inside a solid
+// block (a log) is then reached by standing next to it. Exact moves: range 0 or 1.
+async function move_to(bot, { x, y, z, range = 2 } = {}) {
     // 1. Coordinates must be numbers
     if (![x, y, z, range].every(Number.isFinite) || range < 0) {
         return {

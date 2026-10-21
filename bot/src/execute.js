@@ -95,7 +95,25 @@ async function execute(bot, name, args = {}, source = "manual", meta = {}) {
 
   // 4. The brain gets the game result + a short summary of the trace (the journal keeps everything)
   const { error, ...forBrain } = result;
+  // A stopped skill says only "timeout": tell the brain what it had done anyway (seen: mine stopped
+  // after collecting 8 logs, and the LLM did not know). Not in the journal: it is recomputed exactly
+  // from state and next_state.
+  if (result.reason === "timeout")
+    forBrain.details = { ...result.details, inventory_change: inventoryChange(before, after) };
   return { ...forBrain, body_events: summarizeForBrain(trace) };
 }
 
+// {item: +n or -n} between two observed states ({} if one is unknown)
+function inventoryChange(before, after) {
+  const a = (before && before.inventory) || {};
+  const b = (after && after.inventory) || {};
+  const change = {};
+  for (const name of new Set([...Object.keys(a), ...Object.keys(b)])) {
+    const d = (b[name] || 0) - (a[name] || 0);
+    if (d !== 0) change[name] = d;
+  }
+  return change;
+}
+
 export default execute;
+export { inventoryChange };
