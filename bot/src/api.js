@@ -4,7 +4,7 @@
 //   GET  /skills   -> the skills shown to the LLM (src/skills/catalogue.js); /skills?all=1 -> all of them
 //   GET  /run      -> the current run: run_id, purpose, data_dir, versions... (src/run.js)
 //   POST /execute  -> { name, args, source, episode_id, turn }: runs ONE skill (logged)
-//   POST /setup    -> { x, z, inventory }: puts the bot in a starting situation for a bench (src/setup.js;
+//   POST /setup    -> { x, z, inventory, perception?, count_blocks? }: puts the bot in a starting situation for a bench (src/setup.js;
 //                     server commands, not a skill, not logged)
 // Uses Node's built-in http module: no dependency.
 
@@ -12,6 +12,7 @@ import http from "node:http";
 import execute from "./execute.js";
 import { currentRun } from "./run.js";
 import { setupPlace } from "./setup.js";
+import { findBlockTag } from "./tags.js";
 import { CATALOGUE, COMMON_REASONS, SHOWN_TO_LLM } from "./skills/catalogue.js";
 import { observe } from "./state.js";
 
@@ -82,7 +83,15 @@ function validateSetup(d, bot) {
     if (!Number.isInteger(count) || count < 1 || count > 2304)
       return `invalid count for ${item}`;
   }
-  const unknown = Object.keys(d).filter((k) => !["x", "z", "inventory"].includes(k));
+  if (d.perception !== undefined && !["sight", "all"].includes(d.perception))
+    return 'perception must be "sight" or "all"';
+  const names = d.count_blocks ?? [];
+  if (!Array.isArray(names)) return "count_blocks must be a list of block names or groups (#logs)";
+  for (const n of names) {
+    const known = typeof n === "string" && (n.startsWith("#") ? findBlockTag(bot, n.slice(1)) : bot.registry.blocksByName[n]);
+    if (!known) return `unknown block or group: ${n}`;
+  }
+  const unknown = Object.keys(d).filter((k) => !["x", "z", "inventory", "perception", "count_blocks"].includes(k));
   if (unknown.length) return `unknown fields: ${unknown.join(", ")}`;
   return null;
 }

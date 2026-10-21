@@ -89,6 +89,16 @@ def test_the_history_message_replays_the_calls_as_tool_calls():
     assert message["tool_calls"][0]["function"] == {"name": "scan", "arguments": "{}"}
     assert message["tool_calls"][0]["id"] == "call_0"
     assert read({"content": "no idea"}).history_message() == {"role": "assistant", "content": "no idea"}
+    assert message["content"] == ""  # the JSON text is not repeated next to the tool call
+
+
+def test_text_next_to_the_calls_is_read_but_not_put_back():
+    r = read({"content": "I have 5 logs: I make planks first.",
+              "tool_calls": [tool_call("craft", {"item": "oak_planks", "count": 4})]})
+    assert r.parse_error is None and r.plan == [{"skill": "craft", "args": {"item": "oak_planks", "count": 4}}]
+    assert r.text == "I have 5 logs: I make planks first."  # kept in the reply (and raw_response)
+    # ...but not in the history: qwen2.5's template would show the text and DROP the calls
+    assert r.history_message()["content"] == ""
 
 
 def test_the_fake_llm_turns_a_plan_into_tool_calls():

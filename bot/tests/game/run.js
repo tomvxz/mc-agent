@@ -23,6 +23,8 @@ const SUITES = [
     "scan",
     "explore",
     "mine",
+    "walk",
+    "press",
 ];
 
 // One trial: setup, execution, verification

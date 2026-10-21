@@ -48,7 +48,9 @@ def test_one_place_is_set_up_run_and_checked_on_the_state(tmp_path):
         task, body.client(), llm, place=4, x=10, z=-20, seed=1, max_turns=5
     )
 
-    assert body.setups == [{"x": 10, "z": -20, "inventory": {}}]
+    assert body.setups == [
+        {"x": 10, "z": -20, "inventory": {}, "perception": "sight", "count_blocks": ["oak_log"]}
+    ]
     # The code saw 3 oak_log and ended the episode: no turn for goal_reached, the definition not counted
     assert (r["verified"], r["claimed"], r["end"], r["turns"], r["skill_calls"]) == (
         True,
@@ -58,7 +60,7 @@ def test_one_place_is_set_up_run_and_checked_on_the_state(tmp_path):
         3,
     )
     assert r["condition"] == {"have": {"oak_log": 3}}
-    assert r["watched_near"] is True  # the fake state has oak_log in notable_blocks
+    assert r["watched_near"] is True  # the fake setup counted oak_log around
     assert "[4] (10, -20): REACHED (claimed), 1 turns" in bench.format_record(r)
 
 
@@ -97,7 +99,7 @@ def test_the_crafting_table_task_is_checked_on_the_state(tmp_path):
         1,
         3,
     )
-    assert r["watched_near"] is True  # any wood counts (the fake state has oak_log near)
+    assert r["watched_near"] is True  # any wood counts (#logs, counted by the setup)
     assert r["failures"] == []  # no transitions.jsonl here: the fake body logs nothing
 
 

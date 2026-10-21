@@ -11,17 +11,19 @@
 
 import execute from "../../src/execute.js";
 import { setupPlace } from "../../src/setup.js";
+import { inBlockTag } from "../../src/tags.js";
 import { drawLocations, summarize } from "./plan.js";
 
-const NOTHING = ["air", "cave_air", "void_air", "short_grass", "tall_grass", "fern", "large_fern"];
 const LIQUIDS = ["water", "lava"];
 const at = (bot, x, y, z) => bot.blockAt(bot.entity.position.clone().set(x, y, z));
 
-// A place where the bot can stand in column (x, z): solid ground, 2 free blocks above, no liquid.
-// Searched from 20 blocks above the bot down to 20 below. null if none (or not loaded).
-function standingSpot(bot, x, z) {
-    const top = Math.floor(bot.entity.position.y) + 20;
-    for (let y = top; y > top - 40; y--) {
+// A place where the bot can stand in column (x, z): solid ground that is not leaves (a tree top is not
+// ground: seen, a place_block cell 17 blocks above the bot), 2 free blocks above (air or what the game
+// replaces: grass...), no liquid. Searched from `reach` blocks above the bot down to `reach` below.
+// null if none (or not loaded).
+function standingSpot(bot, x, z, reach = 20) {
+    const top = Math.floor(bot.entity.position.y) + reach;
+    for (let y = top; y > top - 2 * reach; y--) {
         const ground = at(bot, x, y - 1, z);
         const feet = at(bot, x, y, z);
         const head = at(bot, x, y + 1, z);
@@ -29,8 +31,9 @@ function standingSpot(bot, x, z) {
         if (LIQUIDS.includes(feet.name) || LIQUIDS.includes(ground.name)) return null;
         if (
             ground.boundingBox === "block" &&
-            NOTHING.includes(feet.name) &&
-            NOTHING.includes(head.name)
+            !inBlockTag(bot, "leaves", ground) &&
+            inBlockTag(bot, "replaceable", feet) &&
+            inBlockTag(bot, "replaceable", head)
         )
             return [x, y, z];
     }
@@ -52,7 +55,7 @@ function nearestLogType(bot) {
     return best && best.name;
 }
 
-// A free cell next to the ground 2 to 4 blocks from the bot, to place a block on
+// A free cell on the ground 2 to 4 blocks from the bot, at most 2 blocks above or below it, to place a block on
 function placeSpot(bot) {
     const p = bot.entity.position.floored();
     for (const [dx, dz] of [
@@ -65,7 +68,7 @@ function placeSpot(bot) {
         [4, 1],
         [-1, 4],
     ]) {
-        const spot = standingSpot(bot, p.x + dx, p.z + dz);
+        const spot = standingSpot(bot, p.x + dx, p.z + dz, 2);
         if (spot) return spot;
     }
     return null;
@@ -103,6 +106,7 @@ const TASKS = [
 // A location without safe ground (ocean, lava) is replaced by the next one, up to MAX_TRIES * n draws.
 // The first draws of a seed do not depend on n: the locations already played stay the same.
 const MAX_TRIES = 3;
+const MIN_CANDIDATES = 10; // and at least this many draws: about one in two is ocean
 
 // Send the bot to a location, clean (empty inventory except 16 dirt, day, clear weather)
 async function goToLocation(bot, loc) {
@@ -112,7 +116,9 @@ async function goToLocation(bot, loc) {
 async function runField(bot, n, seed, only) {
     const wanted = only === null ? n : 1;
     const candidates =
-        only === null ? drawLocations(seed, MAX_TRIES * n) : drawLocations(seed, only + 1).slice(only);
+        only === null
+            ? drawLocations(seed, Math.max(MAX_TRIES * n, MIN_CANDIDATES))
+            : drawLocations(seed, only + 1).slice(only);
     console.log(`\n=== Field bench: ${wanted} location(s), seed ${seed} ===`);
     const trials = [];
     let played = 0;

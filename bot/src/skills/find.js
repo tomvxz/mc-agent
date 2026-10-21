@@ -1,10 +1,14 @@
+import { perceivesBlock, perceivesEntity, perception } from "../perception.js";
 import { isHostile } from "../state.js";
+import { findBlockTag } from "../tags.js";
 import { round1 } from "./utils.js";
 
 // Question (changes nothing in the world): where are the blocks or entities of a given type?
-// target: a block name ("oak_log"), an entity name ("cow") or "hostile" (every monster).
-// Only sees the loaded chunks around the bot.
-// Search 1 to 50 blocks max
+// target: a block name ("oak_log"), a game group of blocks ("#logs" = any log: the game's tags,
+// src/tags.js), an entity name ("cow") or "hostile" (every monster).
+// Only what the bot perceives (src/perception.js: by default what is in line of sight, not through
+// walls), in the loaded chunks around it. 1 to 50 results, up to 64 blocks away.
+const MAX_SIGHT_CHECKS = 300; // blocks checked for line of sight, nearest first
 async function find(bot, { target, count = 5, max_distance = 64 } = {}) {
   // 1. Check the arguments
   const ok =
@@ -24,17 +28,27 @@ async function find(bot, { target, count = 5, max_distance = 64 } = {}) {
 
   const pos = bot.entity.position;
   const block = bot.registry.blocksByName[target];
+  const group = target.startsWith("#") ? findBlockTag(bot, target.slice(1)) : null;
   let matches;
 
-  if (block) {
-    // 2a. Blocks: search for more than requested, then sort by distance
-    matches = bot
+  if (block || group) {
+    // 2a. Blocks: every one the client knows, nearest first, then only those perceived (a group: say
+    //     which block)
+    const known = bot
       .findBlocks({
-        matching: block.id,
+        matching: group ? [...group] : block.id,
         maxDistance: max_distance,
-        count: Math.max(count * 10, 100),
+        count: 5000,
       })
+      .sort((a, b) => a.distanceTo(pos) - b.distanceTo(pos));
+    const perceived = [];
+    for (const p of known.slice(0, MAX_SIGHT_CHECKS)) {
+      if (perceivesBlock(bot, p)) perceived.push(p);
+      if (perceived.length === count) break;
+    }
+    matches = perceived
       .map((p) => ({
+        ...(group && { block: bot.blockAt(p).name }),
         x: p.x,
         y: p.y,
         z: p.z,
@@ -43,14 +57,15 @@ async function find(bot, { target, count = 5, max_distance = 64 } = {}) {
   } else if (target === "hostile" || bot.registry.entitiesByName[target]) {
     // 2b. Entities (the bot itself is excluded)
     const matchesTarget = (e) =>
-      target === "hostile" ? isHostile(e) : e.name === target;
+      target === "hostile" ? isHostile(bot, e) : e.name === target;
     matches = Object.values(bot.entities)
       .filter(
         (e) =>
           e !== bot.entity &&
           e.position &&
           matchesTarget(e) &&
-          e.position.distanceTo(pos) <= max_distance,
+          e.position.distanceTo(pos) <= max_distance &&
+          perceivesEntity(bot, e),
       )
       .map((e) => ({
         name: e.name,
@@ -69,7 +84,7 @@ async function find(bot, { target, count = 5, max_distance = 64 } = {}) {
     return {
       success: false,
       reason: "not_found",
-      details: { target, max_distance },
+      details: { target, max_distance, perception: perception() },
     };
   return {
     success: true,

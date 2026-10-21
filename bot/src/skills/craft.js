@@ -1,3 +1,5 @@
+import { step } from "../steps.js";
+import { itemGroupOf } from "../tags.js";
 import move_to from "./move_to.js";
 import { waitUntil } from "./utils.js";
 
@@ -9,8 +11,11 @@ import { waitUntil } from "./utils.js";
 // before it was asked (the body itself linked logs -> planks).
 // For now every recipe is known (Mineflayer's data); later a memory may filter them to the ones the
 // agent has met (see CLAUDE.md, Mémoire).
-// Many recipes accept variants (any planks for a pickaxe): equivalent recipes are merged into one
-// ingredient like any_planks: { required: 3, owned: 0, one_of: ['oak_planks', ...] }.
+// details.ingredients is a LIST: [{ item: "stick", required: 2, owned: 0 }, ...]. Many recipes accept
+// variants (any planks for a pickaxe): equivalent recipes are merged into one entry,
+// { group: "#planks", one_of: ['oak_planks', ...], required: 3, owned: 0 }; group = the game's own item
+// group when the variants are exactly one (as the game's recipe names it), else no group. (Before: a
+// made-up key "any_planks", which qwen2.5:3b took for an item twice: craft(any_planks), recipe(any_planks).)
 function recipeNeeds(bot, info, count) {
     try {
         return describeNeeds(bot, info, count);
@@ -47,7 +52,7 @@ function describeNeeds(bot, info, count) {
         return {
             needs_table: best[0].needs_table,
             makes: best[0].makes,
-            ingredients: best[0].ingredients,
+            ingredients: Object.entries(best[0].ingredients).map(([item, need]) => ({ item, ...need })),
         };
     }
 
@@ -55,9 +60,7 @@ function describeNeeds(bot, info, count) {
     const shared = Object.keys(best[0].ingredients).filter((n) =>
         best.every((o) => o.ingredients[n]),
     );
-    const ingredients = Object.fromEntries(
-        shared.map((n) => [n, best[0].ingredients[n]]),
-    );
+    const ingredients = shared.map((item) => ({ item, ...best[0].ingredients[item] }));
     const variants = {};
     for (const o of best) {
         for (const [name, need] of Object.entries(o.ingredients)) {
@@ -65,29 +68,21 @@ function describeNeeds(bot, info, count) {
             const group =
                 variants[need.required] ||
                 (variants[need.required] = {
+                    one_of: [],
                     required: need.required,
                     owned: 0,
-                    one_of: [],
                 });
             if (!group.one_of.includes(name)) group.one_of.push(name);
             group.owned = Math.max(group.owned, need.owned);
         }
     }
-    for (const group of Object.values(variants))
-        ingredients[variantKey(group.one_of)] = group;
-    return { needs_table: best.every((o) => o.needs_table), makes: best[0].makes, ingredients };
-}
-
-// "any_planks" for [oak_planks, spruce_planks, ...]: named after the most common last word
-// (one_of stays the exact list, e.g. sticks can also be made from bamboo)
-function variantKey(names) {
-    const counts = {};
-    for (const n of names) {
-        const last = n.slice(n.lastIndexOf("_") + 1);
-        counts[last] = (counts[last] || 0) + 1;
+    // A set of variants that is one of the game's item groups is named like the game's recipe does:
+    // { group: "#planks", one_of: [...] } (find and mine take block groups like "#logs" too)
+    for (const v of Object.values(variants)) {
+        const group = itemGroupOf(bot, v.one_of);
+        ingredients.push(group ? { group, ...v } : v);
     }
-    const [word] = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
-    return `any_${word}`;
+    return { needs_table: best.every((o) => o.needs_table), makes: best[0].makes, ingredients };
 }
 
 async function craft(bot, { item, count = 1 } = {}) {
@@ -135,7 +130,7 @@ async function craft(bot, { item, count = 1 } = {}) {
 
         // Walk to the table with the move_to skill
         const p = table.position;
-        const walk = await move_to(bot, { x: p.x, y: p.y, z: p.z, range: 3 });
+        const walk = await step(bot, "move_to", move_to, { x: p.x, y: p.y, z: p.z, range: 3 });
         if (!walk.success)
             return {
                 success: false,

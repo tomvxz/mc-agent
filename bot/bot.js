@@ -5,7 +5,8 @@ import { runCommand } from "./src/commands.js";
 import { fixDifficulty, fixStateId, fixWallContact } from "./src/fixes.js";
 import { getMovements } from "./src/movements.js";
 import { startRun, watchLogin } from "./src/run.js";
-import { trackDeaths } from "./src/state.js";
+import { trackDeaths, trackFall } from "./src/state.js";
+import { recordTags } from "./src/tags.js";
 const { pathfinder } = mineflayerPathfinder;
 
 const host = process.env.MC_HOST || "localhost";
@@ -16,12 +17,14 @@ const bot = mineflayer.createBot({
     username: process.env.MC_USERNAME || "Agent",
     version: process.env.MC_VERSION,
 });
+recordTags(bot); // the game's block tags (src/tags.js): sent once at login, listen before it arrives
 bot.loadPlugin(pathfinder);
 fixStateId(bot); // see src/fixes.js
 fixDifficulty(bot);
 fixWallContact(); // see src/fixes.js: the bot froze against every wall
 watchLogin(bot); // view and simulation distances, for run_start
 trackDeaths(bot); // deaths count, part of the state
+trackFall(bot); // fall distance, part of the state
 
 bot.on("error", (err) => console.error("[error]", err.message));
 bot.on("kicked", (reason) => console.error("[kicked]", reason));

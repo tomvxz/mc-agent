@@ -1,57 +1,26 @@
+import { inSight, perceivesEntity, perception, SIGHT_RADIUS } from "../perception.js";
 import { round1 } from "./utils.js";
 
-// Useful blocks to report to the LLM (on top of every log and every ore)
-const USEFUL = [
-    "water",
-    "lava",
-    "crafting_table",
-    "furnace",
-    "chest",
-    "sand",
-    "gravel",
-    "clay",
-];
-const MAX_BLOCKS = 2000; // beyond this the count is truncated (reported by truncated)
-
-// Question (changes nothing in the world): summary of what is around the bot.
-// Broader than observe(): observe feeds the world model and must stay simple.
+// Question (changes nothing in the world): summary of what the bot PERCEIVES around it (src/perception.js:
+// by default in line of sight, not through walls). The blocks are the same summary as the state's
+// in_sight (one computation), within the radius asked; + the entities.
 async function scan(bot, { radius = 16 } = {}) {
-    if (!Number.isFinite(radius) || radius <= 0 || radius > 32) {
+    if (!Number.isFinite(radius) || radius <= 0 || radius > SIGHT_RADIUS) {
         return { success: false, reason: "invalid_args", details: { radius } };
     }
     const pos = bot.entity.position;
-    const r = bot.registry;
 
-    // 1. Blocks: logs, ores and the USEFUL list
-    const names = Object.keys(r.blocksByName).filter(
-        (n) => n.endsWith("_log") || n.endsWith("_ore") || USEFUL.includes(n),
-    );
-    const positions = bot.findBlocks({
-        matching: names.map((n) => r.blocksByName[n].id),
-        maxDistance: radius,
-        count: MAX_BLOCKS,
-    });
+    // 1. Every kind of block perceived (no list)
     const blocks = {};
-    for (const p of positions) {
-        const name = bot.blockAt(p).name;
-        const d = p.distanceTo(pos);
-        const b =
-            blocks[name] ||
-            (blocks[name] = { count: 0, nearest: null, d: Infinity });
-        b.count++;
-        if (d < b.d) {
-            b.d = d;
-            b.nearest = [p.x, p.y, p.z];
-        }
-    }
-    for (const b of Object.values(blocks)) delete b.d; // the distance was only needed for the computation
+    for (const [name, b] of Object.entries(inSight(bot, radius)))
+        blocks[name] = { count: b.count, nearest: b.nearest };
 
     // 2. Entities (animals, monsters, players, items on the ground), except the bot itself
     const entities = {};
     for (const e of Object.values(bot.entities)) {
         if (e === bot.entity || !e.position) continue;
         const d = e.position.distanceTo(pos);
-        if (d > radius) continue;
+        if (d > radius || !perceivesEntity(bot, e)) continue;
         const name = e.name || e.type;
         const s =
             entities[name] ||
@@ -68,9 +37,10 @@ async function scan(bot, { radius = 16 } = {}) {
         reason: "ok",
         details: {
             radius,
+            perception: perception(),
             blocks,
             entities,
-            truncated: positions.length >= MAX_BLOCKS,
+            // counts are cells seen by a fan of rays (src/perception.js), not every block of the kind
         },
     };
 }

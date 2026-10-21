@@ -17,7 +17,7 @@ Usage (bot running in API mode, LLM server running), from the repo root:
     uv run python -m brain.bench                    # 5 fresh places of seed 1
     uv run python -m brain.bench --places 3 --seed 2
     uv run python -m brain.bench --no-condition     # without the goal condition (brain/goal.py)
-    uv run python -m brain.bench --compare --places 10   # with / without the condition, alternated
+    uv run python -m brain.bench --compare condition --places 10   # with / without one component, alternated
     uv run python -m brain.bench --only 4           # replay place 4 (even if used: to debug only)
 """
 
@@ -36,8 +36,12 @@ from brain.body import Body
 from brain.llm import OpenAICompatibleLLM
 from brain.show import load_episodes, load_transitions
 
-SPREAD = 2000  # places are drawn in [-SPREAD, SPREAD] on x and z (like the field bench)
-MAX_TRIES = 3  # a place without safe ground (ocean, lava) is replaced by the next one, up to MAX_TRIES * N places
+SPREAD = 5000  # places are drawn in [-SPREAD, SPREAD] on x and z (far: more fresh places per seed)
+# A place without safe ground (ocean, lava) is replaced by the next one, among the first MAX_DRAWS draws.
+# Not a budget per wanted place: the used places are skipped, so the ones left first in a seed are the
+# oceans that failed in every run before (seed 1, 2026-10-21: 10 candidates, all oceans).
+# Cheap: the server refuses an ocean at once (src/setup.js).
+MAX_DRAWS = 100
 USED_RADIUS = 100  # a place closer than this to a place already played is not fresh
 SCENARIO = re.compile(r"bench:[^:]+:seed(-?\d+):place(\d+)")
 
@@ -62,21 +66,9 @@ class Task:
     ]  # (start state, final state) -> goal really reached?
     inventory: dict[str, int] = field(default_factory=dict)  # given at the start
     # Blocks worth knowing about at the start: is one of them within 32 blocks? (a failure without
-    # any tree around does not measure the same thing)
+    # any tree around does not measure the same thing). Block names or game groups ("#logs"), counted
+    # by the body over everything it knows, not only what the bot sees.
     watch: tuple[str, ...] = ()
-
-
-# Every wood: the biome decides the trees
-LOGS = (
-    "oak_log",
-    "birch_log",
-    "spruce_log",
-    "jungle_log",
-    "acacia_log",
-    "dark_oak_log",
-    "mangrove_log",
-    "cherry_log",
-)
 
 TASKS = {
     "oak_logs": Task(
@@ -90,7 +82,7 @@ TASKS = {
         name="crafting_table",
         goal="craft a crafting table",
         check=lambda start, final: gained(start, final, "crafting_table") >= 1,
-        watch=LOGS,
+        watch=("#logs",),  # every wood: the biome decides the trees
     ),
 }
 
@@ -130,10 +122,14 @@ def run_place(
     seed: int,
     max_turns: int,
     goal_condition: bool = True,
+    sight: bool = True,
 ) -> dict[str, Any]:
-    """Set the place up, run one episode, and check the result. Returns one record."""
+    """Set the place up, run one episode, and check the result. Returns one record.
+    sight: the bot perceives only what is in line of sight (False: everything the client knows)."""
     record: dict[str, Any] = {"place": place, "x": x, "z": z}
-    setup = body.setup(x, z, task.inventory)
+    setup = body.setup(
+        x, z, task.inventory, perception="sight" if sight else "all", count_blocks=list(task.watch)
+    )
     if not setup["success"]:
         return {
             **record,
@@ -141,10 +137,8 @@ def run_place(
             "setup_details": setup.get("details"),
         }
     start = body.state()
-    notable = start.get("notable_blocks") or {}
-    record["watched_near"] = (
-        any(block in notable for block in task.watch) if task.watch else None
-    )
+    counted = (setup.get("details") or {}).get("blocks_within_32") or {}
+    record["watched_near"] = any(n > 0 for n in counted.values()) if task.watch else None
 
     outcome = run_episode(
         task.goal,
@@ -192,8 +186,13 @@ def load_episodes_of(body: Body, episode_id: str) -> list[dict[str, Any]]:
     return load_episodes(path)[episode_id]
 
 
-def variant_name(goal_condition: bool) -> str:
-    return "condition" if goal_condition else "no condition"
+# The components that can be switched on and off, as run_place's arguments: (name on, name off)
+COMPONENTS = {"goal_condition": ("condition", "no condition"), "sight": ("sight", "x-ray")}
+
+
+def variant_name(options: dict[str, bool]) -> str:
+    """e.g. "condition, sight" or "no condition, x-ray"."""
+    return ", ".join(on if options[c] else off for c, (on, off) in COMPONENTS.items())
 
 
 def summarize(records: list[dict[str, Any]]) -> dict[str, Any]:
@@ -233,7 +232,8 @@ def format_record(r: dict[str, Any]) -> str:
         else f", watched block within 32: {'yes' if r['watched_near'] else 'no'}"
     )
     condition = f", condition {r['condition']['have']}" if r.get("condition") else ""
-    failures = f", failed: {', '.join(r['failures'])}" if r.get("failures") else ""
+    # Skills that failed ON THE WAY (the episode may still reach its goal): what to fix in the body
+    failures = f", skill failures on the way: {', '.join(r['failures'])}" if r.get("failures") else ""
     return (
         f"{where}: {verdict} ({claim}), {r['turns']} turns, {r['skill_calls']} skill calls, "
         f"{r['unusable']} unusable, {r['duration']} s{near}{condition}{failures}  {r['episode_id']}"
@@ -273,15 +273,26 @@ def main() -> None:
         help="no goal condition: only goal_reached",
     )
     parser.add_argument(
-        "--compare",
+        "--xray",
         action="store_true",
-        help="alternate with / without the goal condition",
+        help="the bot perceives everything the client knows, walls or not (default: line of sight)",
+    )
+    parser.add_argument(
+        "--compare",
+        choices=["condition", "sight"],
+        default=None,
+        help="alternate with / without ONE component, place after place (the others as given)",
     )
     args = parser.parse_args()
 
     task = TASKS[args.task]
     llm = OpenAICompatibleLLM()
-    variants = [True, False] if args.compare else [not args.no_condition]
+    base = {"goal_condition": not args.no_condition, "sight": not args.xray}
+    if args.compare:
+        key = "goal_condition" if args.compare == "condition" else args.compare
+        variants = [{**base, key: True}, {**base, key: False}]
+    else:
+        variants = [base]
     with Body() as body:
         used = used_places(pathlib.Path(body.run()["data_dir"]) / "episodes.jsonl")
         # Candidates in a fixed order: used places are skipped, then the places that cannot be set up
@@ -298,18 +309,16 @@ def main() -> None:
             wanted = args.places
             candidates = [
                 (i, p)
-                for i, p in enumerate(
-                    draw_places(args.seed, MAX_TRIES * wanted + len(used))
-                )
+                for i, p in enumerate(draw_places(args.seed, MAX_DRAWS))
                 if is_fresh(*p, used)
-            ][: MAX_TRIES * wanted]
+            ]
         print(
             f"=== Bench {task.name} ({task.goal!r}): {wanted} place(s), seed {args.seed}, LLM {llm.model}, "
             f"{' / '.join(variant_name(v) for v in variants)}, {len(used)} place(s) already used ==="
         )
         records = []
         for place, (x, z) in candidates:
-            condition = variants[
+            options = variants[
                 sum("setup_failed" not in r for r in records) % len(variants)
             ]
             records.append(
@@ -323,9 +332,9 @@ def main() -> None:
                         z,
                         args.seed,
                         args.max_turns,
-                        condition,
+                        **options,
                     ),
-                    "variant": variant_name(condition),
+                    "variant": variant_name(options),
                 }
             )
             print(

@@ -6,10 +6,12 @@ import {
     inventoryCounts,
     makeVec3,
     movementFailureReason,
+    walkSeconds,
 } from "./utils.js";
+import { inBlockTag } from "../tags.js";
 const { goals } = mineflayerPathfinder;
 
-const NOTHING = ["air", "cave_air", "void_air", "water", "lava"];
+const LIQUIDS = ["water", "lava"]; // with the game's tag minecraft:air: nothing to break there
 const QUICK_HARDNESS = 0.25; // breaks almost instantly: leaves 0.2, tall grass 0, snow 0.1, vines 0.2
 const MAX_CLEARED = 6; // at most this many blocks broken just to see the target
 // Look at the faces of the target turned towards the bot (at most 3, like Mineflayer's
@@ -111,10 +113,12 @@ async function getInView(bot, target, ready) {
 
 // Break the block at a position, and only that (to also get the items: collect_block). The bot
 // walks to a place where it sees the block; if there is none, it breaks leaves or tall grass hiding it.
-async function break_block(bot, { x, y, z } = {}) {
+// require_tool (default true): refuse a block that drops nothing without the right tool (stone without a
+// pickaxe); false = break it anyway, like a player clearing a way: slower, and nothing drops (no_drop).
+async function break_block(bot, { x, y, z, require_tool = true } = {}) {
     // 1. Check the arguments
-    if (![x, y, z].every(Number.isInteger))
-        return { success: false, reason: "invalid_args", details: { x, y, z } };
+    if (![x, y, z].every(Number.isInteger) || typeof require_tool !== "boolean")
+        return { success: false, reason: "invalid_args", details: { x, y, z, require_tool } };
     const position = [x, y, z];
     const target = makeVec3(bot, x, y, z);
 
@@ -122,7 +126,7 @@ async function break_block(bot, { x, y, z } = {}) {
     const block = bot.blockAt(target);
     if (!block)
         return { success: false, reason: "not_loaded", details: { position } };
-    if (NOTHING.includes(block.name))
+    if (inBlockTag(bot, "air", block) || LIQUIDS.includes(block.name))
         return {
             success: false,
             reason: "nothing_to_break",
@@ -136,10 +140,10 @@ async function break_block(bot, { x, y, z } = {}) {
         };
 
     // 3. Some blocks require a tool (stone needs a pickaxe), otherwise they drop nothing
-    if (
-        block.harvestTools &&
-        !bot.inventory.items().some((i) => block.harvestTools[i.type])
-    ) {
+    const noDrop =
+        !!block.harvestTools &&
+        !bot.inventory.items().some((i) => block.harvestTools[i.type]);
+    if (noDrop && require_tool) {
         const tools = Object.keys(block.harvestTools).map(
             (id) => bot.registry.items[id].name,
         );
@@ -208,8 +212,20 @@ async function break_block(bot, { x, y, z } = {}) {
             drops,
             collected: gainedSince(bot, before),
             ...(cleared && { cleared }),
+            ...(noDrop && { no_drop: true }), // broken without the right tool: nothing could drop
         },
     };
 }
 
+// Estimated duration, for its time budget (runSkill.js): walking there + the game's digging time with
+// the best tool of the inventory (obsidian by hand: minutes, refused as too_long before starting)
+function digSeconds(bot, { x, y, z }) {
+    const block = bot.blockAt(makeVec3(bot, x, y, z));
+    if (!block) return 0;
+    const tool = bot.pathfinder.bestHarvestTool(block);
+    return block.digTime(tool ? tool.type : null, false, false, false, [], {}) / 1000;
+}
+break_block.budget = (bot, args) => walkSeconds(bot, args.x, args.y, args.z) + digSeconds(bot, args);
+
 export default break_block;
+export { digSeconds };

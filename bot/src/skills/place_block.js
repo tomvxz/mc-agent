@@ -1,8 +1,8 @@
 import mineflayerPathfinder from "mineflayer-pathfinder";
+import { inBlockTag } from "../tags.js";
 import { gotoWatched, makeVec3, movementFailureReason } from "./utils.js";
 const { goals } = mineflayerPathfinder;
 
-const EMPTY = ["air", "cave_air", "void_air"];
 // The 6 neighbours of a block: below, above, and the 4 sides
 const NEIGHBOURS = [
     [0, -1, 0],
@@ -34,13 +34,17 @@ async function place_block(bot, { item, x, y, z } = {}) {
             details: { item },
         };
 
-    // 2. The target cell must be empty
+    // 2. The target cell must be free: air, or what the game replaces when a block is placed there
+    //    (its tag minecraft:replaceable: grass, ferns, vines, water...; flowers are not in it). The tag is
+    //    not the whole rule: snow is in it but the game replaces only ONE layer, the only state of it
+    //    without a collision box (seen: 3 layers hid the support's face, no_path). So: in the tag AND
+    //    nothing to collide with.
     const position = [x, y, z];
     const target = makeVec3(bot, x, y, z);
     const current = bot.blockAt(target);
     if (!current)
         return { success: false, reason: "not_loaded", details: { position } };
-    if (!EMPTY.includes(current.name)) {
+    if (!inBlockTag(bot, "replaceable", current) || current.shapes.length > 0) {
         return {
             success: false,
             reason: "occupied",

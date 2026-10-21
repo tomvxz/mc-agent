@@ -5,12 +5,14 @@ from brain.tests.fakes import CATALOGUE, STATE
 
 
 def test_the_state_view_gives_absolute_coordinates_and_skips_the_grid():
-    text = render.render_state({**STATE, "blocks": {"cells": [0] * 1331}})
-    assert "Position: (100, 64, -21)" in text
+    text = render.render_state(STATE)
+    assert "Position: (100, 64, -21), standing on grass_block." in text  # read from the grid
     assert "food 18/20" in text
     assert "Inventory: empty." in text
     assert "cow 9 blocks north" in text
-    assert "oak_log: 9 within 32, nearest at (104, 64, -19)" in text  # 100.5+3.5, -20.5+1.5
+    assert "zombie" not in text  # behind a wall: not perceived (perception "sight")
+    assert "zombie" in render.render_state({**STATE, "perception": "all"})
+    assert "In sight: oak_log x2, nearest at (104, 64, -19)." in text  # 100.5+3.5, -20.5+1.5
     assert "cells" not in text
 
 
@@ -54,3 +56,4 @@ def test_health_change_without_death():
 def test_goal_and_state_messages_end_with_the_next_step_reminder():
     assert render.render_goal("wood", STATE).endswith(render.NEXT_STEP)
     assert render.render_new_state(STATE).endswith(render.NEXT_STEP)
+

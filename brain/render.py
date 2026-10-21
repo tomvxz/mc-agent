@@ -46,6 +46,10 @@ NEXT_STEP = (
     "If the goal is reached, call the tool goal_reached."
 )
 
+# Tried then removed: asking for one or two sentences of reasoning before the calls. It did not help
+# llama3.1:8b (crafting_table 0/1, it stopped writing after the first turn), and qwen2.5:14b then wrote
+# its calls as text ('recipe({"item": ...})'), 0 skill run in 10 turns; without it, 3/3 (2026-10-21).
+
 
 # The separate call before the loop that turns the goal into a condition (brain/goal.py).
 # Flat arguments (item, count), not an object {item: count}: qwen2.5:3b closed the nested object
@@ -188,14 +192,27 @@ def render_progress(progress: dict[str, tuple[int, int]] | None) -> str | None:
     return f"Goal progress: {parts}."
 
 
+def _block_below(state: dict[str, Any]) -> str | None:
+    """The block under the feet, read from the grid (cell dx=0, dy=-1, dz=0), without its state
+    ("grass_block[snowy=false]" -> "grass_block"). The state has no such field: it is recomputed."""
+    grid = state.get("blocks")
+    if not grid:
+        return None
+    r = grid["radius"]
+    side = 2 * r + 1
+    cell = grid["cells"][(r - 1) * side * side + r * side + r]
+    return None if cell is None else grid["palette"][cell].split("[")[0]
+
+
 def render_state(state: dict[str, Any] | None) -> str:
-    """A short text view of the full state (the 11x11x11 block grid is left out on purpose)."""
+    """A short text view of the state (the block grid is left out on purpose). What it lists is what
+    the bot perceives (bot/src/perception.js): by default, what is in line of sight."""
     if state is None:
         return "State: unavailable (the bot may be dead or disconnected)."
     x, y, z = state["position"]
     bx, by, bz = int(x // 1), int(y // 1), int(z // 1)
     lines = [
-        f"Position: ({bx}, {by}, {bz}), standing on {state.get('block_below') or 'unknown'}.",
+        f"Position: ({bx}, {by}, {bz}), standing on {_block_below(state) or 'unknown'}.",
         f"Health {state['health']:g}/20, food {state['food']}/20.",
         f"Time: {_time_of_day(state.get('time_of_day'))}"
         + (", raining" if state.get("raining") else "")
@@ -211,7 +228,10 @@ def render_state(state: dict[str, Any] | None) -> str:
     held = state.get("held_item")
     lines.append(f"Holding: {held['name'] if held else 'nothing'}.")
 
-    entities = state.get("entities") or []
+    # Only what the bot perceives: with perception "sight", the entities it sees (bot/src/perception.js)
+    entities = [
+        e for e in state.get("entities") or [] if state.get("perception") != "sight" or e.get("visible") is not False
+    ]
     if entities:
         described = []
         for e in entities[:6]:
@@ -224,27 +244,24 @@ def render_state(state: dict[str, Any] | None) -> str:
     else:
         lines.append("Nearby: nothing.")
 
-    notable = state.get("notable_blocks") or {}
-    if notable:
+    # Every kind of block in sight (within 32 blocks), nearest first, absolute coordinates. No limit:
+    # sorted by distance, the ground comes first and a limit cut the trees off (15 to 25 kinds seen)
+    in_sight = state.get("in_sight") or {}
+    if in_sight:
         described = []
-        for name, info in sorted(notable.items(), key=lambda kv: kv[1]["distance"]):
+        for name, info in sorted(in_sight.items(), key=lambda kv: kv[1]["distance"]):
             ox, oy, oz = info["nearest"]
-            nx, ny, nz = (
-                round(x + ox),
-                round(y + oy),
-                round(z + oz),
-            )  # absolute block coordinates
-            described.append(
-                f"{name}: {info['r32']} within 32, nearest at ({nx}, {ny}, {nz})"
-            )
-        lines.append("Visible resources: " + "; ".join(described) + ".")
+            described.append(f"{name} x{info['count']}, nearest at ({round(x + ox)}, {round(y + oy)}, {round(z + oz)})")
+        lines.append("In sight: " + "; ".join(described) + ".")
     else:
-        lines.append("Visible resources: none within 32 blocks.")
+        lines.append("In sight: nothing within 32 blocks.")
     return "\n".join(lines)
 
 
 def render_goal(
-    goal: str, state: dict[str, Any] | None, progress: dict[str, tuple[int, int]] | None = None
+    goal: str,
+    state: dict[str, Any] | None,
+    progress: dict[str, tuple[int, int]] | None = None,
 ) -> str:
     """The first user message of an episode."""
     line = render_progress(progress)

@@ -1,5 +1,6 @@
 import mineflayerPathfinder from "mineflayer-pathfinder";
 import { isHostile } from "./state.js";
+import { blockTag } from "./tags.js";
 const { Movements } = mineflayerPathfinder;
 
 // Pathfinder movement settings.
@@ -39,8 +40,8 @@ const AVOID = [
 ];
 // Blocks never to stand on (they burn)
 const DANGEROUS_FLOOR = ["magma_block", "campfire", "soul_campfire"];
-// Useful blocks never to break on the way
-// (+ every bed, door and fence gate, added below)
+// Useful blocks never to break on the way: our choice, not a game fact
+// (+ every bed, door and fence gate: the game's tags, added below)
 const PROTECTED = [
     "chest",
     "trapped_chest",
@@ -61,6 +62,7 @@ const SCAFFOLDING_BLOCKS = [
     "netherrack",
 ];
 
+const MAX_DROP_DOWN = 3; // no fall higher than this (no damage): also the low-level skills' instinct
 const HOSTILE_DISTANCE = 4; // cells closer than this to a monster cost more
 const HOSTILE_COST = 20;
 
@@ -81,17 +83,11 @@ function create(bot) {
 
     // Instincts
     m.liquidCost = 3; // water costs more: go around it when possible
-    m.maxDropDown = 3; // no fall higher than 3 blocks (no damage)
+    m.maxDropDown = MAX_DROP_DOWN;
     for (const n of AVOID) m.blocksToAvoid.add(r.blocksByName[n].id);
     for (const n of PROTECTED) m.blocksCantBreak.add(r.blocksByName[n].id);
-    for (const n of Object.keys(r.blocksByName)) {
-        if (
-            n.endsWith("_bed") ||
-            n.endsWith("_door") ||
-            n.endsWith("_fence_gate")
-        )
-            m.blocksCantBreak.add(r.blocksByName[n].id);
-    }
+    for (const tag of ["beds", "doors", "fence_gates"])
+        for (const id of blockTag(bot, tag)) m.blocksCantBreak.add(id);
     const dangerousFloor = new Set(
         DANGEROUS_FLOOR.map((n) => r.blocksByName[n].id),
     );
@@ -103,7 +99,7 @@ function create(bot) {
     const hostilePositions = () => {
         if (Date.now() - hostilesTime > 1000) {
             hostiles = Object.values(bot.entities)
-                .filter((e) => isHostile(e) && e.position)
+                .filter((e) => isHostile(bot, e) && e.position)
                 .map((e) => e.position);
             hostilesTime = Date.now();
         }
@@ -137,4 +133,4 @@ function getMovements(bot) {
     return cache.get(bot);
 }
 
-export { getMovements, NoCornerCutMovements, SCAFFOLDING_BLOCKS };
+export { getMovements, MAX_DROP_DOWN, NoCornerCutMovements, SCAFFOLDING_BLOCKS };

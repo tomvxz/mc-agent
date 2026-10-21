@@ -24,8 +24,8 @@ from typing import Any
 
 import httpx
 
-# A skill can last up to 60 s (runSkill's limit on the Node side): wait a little longer
-EXECUTE_TIMEOUT = 70.0
+# A skill can last up to 300 s (runSkill's hard cap on the Node side): wait a little longer
+EXECUTE_TIMEOUT = 310.0
 SHORT_TIMEOUT = 5.0  # for /state and /skills, which answer immediately
 SETUP_TIMEOUT = 45.0  # teleport + chunks loading (up to 15 s) + commands
 
@@ -114,14 +114,25 @@ class Body:
         return self._request("POST", "/execute", json=request, timeout=EXECUTE_TIMEOUT)
 
     def setup(
-        self, x: int, z: int, inventory: dict[str, int] | None = None
+        self,
+        x: int,
+        z: int,
+        inventory: dict[str, int] | None = None,
+        perception: str | None = None,
+        count_blocks: list[str] | None = None,
     ) -> dict[str, Any]:
         """Teleport the bot onto the ground at column (x, z), with exactly this inventory, by day
         and clear weather (bot/src/setup.js). Returns {success, reason, details}.
+        perception: "sight" or "all" for the skills that follow (bot/src/perception.js).
+        count_blocks: blocks or groups ("#logs") to count within 32 blocks (details.blocks_within_32).
 
         Server commands, not a skill: not logged as a transition, never offered to the LLM.
         """
-        request = {"x": x, "z": z, "inventory": inventory or {}}
+        request: dict[str, Any] = {"x": x, "z": z, "inventory": inventory or {}}
+        if perception is not None:
+            request["perception"] = perception
+        if count_blocks:
+            request["count_blocks"] = count_blocks
         return self._request("POST", "/setup", json=request, timeout=SETUP_TIMEOUT)
 
     def close(self) -> None:

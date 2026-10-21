@@ -4,6 +4,9 @@ Agent Minecraft qui raisonne et parle (LLM), et anticipe les conséquences de se
 branché sur le VRAI jeu via Mineflayer. Projet d'apprentissage : l'utilisateur débute en JavaScript.
 
 ## Architecture (carte détaillée, un fichier par ligne : `docs/overview.md`)
+- Architecture CIBLE (composants, boucle de décision, qui décide à chaque étape, liaisons, mémoire <-> espace
+  latent, stabilité des compétences, étapes A à J) : `docs/architecture.md`. S'y référer avant de concevoir
+  un nouveau composant, et la tenir à jour quand une décision change.
 - `server/` : serveur Paper 1.21.11 local (online-mode=false). Le bot est op.
 - `bot/` : Node.js, Mineflayer + mineflayer-pathfinder, modules ES (`import`/`export`, `"type": "module"`).
   Extension `.js` obligatoire dans les chemins relatifs. Les bibliothèques CommonJS (Mineflayer, pathfinder...)
@@ -21,6 +24,7 @@ branché sur le VRAI jeu via Mineflayer. Projet d'apprentissage : l'utilisateur 
   - `src/state.js` : `observe(bot)` = LA définition unique de l'état (pas de pixels), utilisée par l'API et le journal
   - `src/trace.js` : ce qui se passe pendant une compétence (touches, trajectoire, actions, blocs, entités, événements)
   - `src/commands.js` : `runCommand`, envoyer une commande serveur
+  - `src/tags.js` : les groupes de blocs DU JEU (tags envoyés par le serveur : replaceable, leaves, beds...)
   - `tests/unit/` (`npm test`, faux bot, sans serveur), `tests/game/` (arène reproductible, taux de réussite),
     `tests/field/` (lieux naturels tirés au hasard : taux de réussite ET répartition des raisons d'échec)
 - `data/` (ignoré par git, format : `docs/journal.md`) : `runs.jsonl`, `transitions.jsonl`, `episodes.jsonl`.
@@ -31,7 +35,7 @@ branché sur le VRAI jeu via Mineflayer. Projet d'apprentissage : l'utilisateur 
   `journal.py` épisodes, `goal.py` la condition de but. Lancer un épisode : `uv run python -m brain.agent "but" --max-turns N`.
   Le lire : `uv run python -m brain.show [fin de l'id] [--full]` (`show.py`, lecture seule).
   Banc d'épisodes : `uv run python -m brain.bench [--task T] [--places N] [--seed S]` (`bench.py`) : succès VÉRIFIÉ
-  sur l'état (pas seulement le goal_reached du LLM), tours, réponses inutilisables. Une tâche pour l'instant (oak_logs).
+  sur l'état (pas seulement le goal_reached du LLM), tours, réponses inutilisables. Tâches : oak_logs, crafting_table.
 - `notebooks/explore_body.ipynb` : explorer l'API, le journal, et la boucle avec un faux ou un vrai LLM.
 - Communication corps/cerveau : Node (le corps) expose une petite API HTTP locale ; Python (le cerveau) l'appelle.
   Node peut contenir des logiques de décision (réflexes, choix internes d'une compétence, et plus si c'est utile) ;
@@ -40,7 +44,13 @@ branché sur le VRAI jeu via Mineflayer. Projet d'apprentissage : l'utilisateur 
 ## Conventions à respecter
 - Une compétence est `async function nom(bot, args)` et renvoie TOUJOURS `{ success, reason, details }`
   (`runSkill` ajoute `duration`). Les échecs sont rapportés honnêtement, jamais masqués.
-- Chaque compétence a un timeout dur (via `runSkill`). Aucune exception ne doit s'échapper.
+- Arrêt d'une compétence (`runSkill`), pas un temps limite unique : son BUDGET (estimation tirée des faits du jeu,
+  `skill.budget(bot, args)` : distance, temps de creusage, nombre de blocs ; arrêt à 3x + 10 s, `timeout` ; refus
+  avant de commencer si ça dépasse le plafond, `too_long`), PLUS DE PROGRÈS pendant 15 s (`no_progress`), une
+  ALERTE (blessé, ou un NOUVEAU monstre à moins de 6 blocs : `alert`, le cerveau décide), plafond dur 300 s
+  contre les bugs. Aucune exception ne doit s'échapper. Le plafond est TEMPORAIRE comme limite de comportement :
+  quand toutes les compétences auront un budget, `too_long` deviendra une décision du cerveau (durée annoncée,
+  plus tard prédite par le world model) et il ne restera qu'un garde-fou très large contre les bugs.
 - Toujours appeler `execute(bot, name, args, source)`, jamais `runSkill` seul, pour que tout soit journalisé.
 - La version de Minecraft vit uniquement dans `.env` (MC_VERSION). Ne jamais l'écrire en dur.
 - Ne pas mettre à jour les dépendances (pas de `npm audit fix`, `npm update`) : versions figées par package-lock.json.
@@ -52,7 +62,10 @@ branché sur le VRAI jeu via Mineflayer. Projet d'apprentissage : l'utilisateur 
   Une collecte (`MC_DATA_PURPOSE=collection`) refuse de démarrer si le code n'est pas commité.
 - Ne jamais accélérer le serveur (`/tick rate`) pour collecter : Mineflayer reste en temps réel, les données seraient faussées.
 - Commandes serveur envoyées par notre code : toujours via `src/commands.js` (`runCommand`).
-- Format du journal GELÉ jusqu'à l'étape 7 : pas de nouveau champ. On garde ce qui aide à comprendre une compétence maintenant.
+- Format du journal LIBRE tant que rien n'est collecté (les données de dev sont jetables) ; il sera GELÉ au
+  premier run de collecte (`MC_DATA_PURPOSE=collection`). Chaque changement = nouvelle `schema_version`.
+- Les compétences appelées À L'INTÉRIEUR d'une compétence (étapes d'un raccourci) ont leur propre ligne,
+  reliée par `parent_seq` (`src/steps.js`), sans trace (c'est une tranche de la trace du haut).
 - Ne pas stocker ce qui se recalcule exactement à partir du journal (liste dans `docs/journal.md`).
 
 ## Philosophie des compétences (décision de conception)
@@ -64,9 +77,19 @@ branché sur le VRAI jeu via Mineflayer. Projet d'apprentissage : l'utilisateur 
   - Raccourcis (macros) pour l'efficacité : `collect_block(x,y,z)` = break_block + pick_up, `mine(block,count)` = find + collect_block répétés. `flee` = `find(hostile)` + `move_to` : pas de raccourci pour l'instant.
     Un raccourci est un assemblage de primitives (ex. mine = find + collect_block), pas un code à part.
     Un raccourci évite au LLM d'enchaîner des primitives trivialement cumulables (ex. casser puis ramasser).
+- Bas niveau, sans pathfinder, CACHÉES au LLM : `walk(yaw, distance≤8)` (tout droit, saute les marches, mêmes
+  instincts que le pathfinder : `dangerAhead`, lave, eau, chute > 3), `look(yaw, pitch)`, `press(keys, ticks≤40)`
+  (touches tenues, entrée BRUTE : aucune vérification ni raison de danger). Angles en radians, convention de l'état.
+  Redondantes exprès : issue de secours quand le pathfinder bloque (tactiques), données variées et courtes
+  (exploration au hasard), futur contrôleur appris.
 - Compétences "questions" (sans effet sur le monde) : `find(bloc|entité)` et `scan`, pour que le LLM sache où sont les ressources,
   et `recipe(item)` (une page du livre de recettes, STRICTEMENT un niveau : ingrédients, quantité produite, table ;
-  rien sur la façon d'obtenir les ingrédients : le LLM redemande, `no_recipe` = ça se récolte). Essayé puis retiré :
+  rien sur la façon d'obtenir les ingrédients : le LLM redemande, `no_recipe` = ça se récolte). Dans les deux
+  sens : `recipe(uses: X)` = ce qu'on fabrique directement AVEC X (la section « utilisation » du wiki) ; les
+  variantes portent le groupe du jeu (`#planks`, comme la vraie recette), et `recipe("#planks")` donne la
+  recette de chaque membre. `craftable()` = ce que l'inventaire permet MAINTENANT (le filtre « réalisables » du
+  livre). Vu : le 14B, avec du bouleau, demandait `recipe(oak_planks)` (12 variantes sans lien avec son
+  inventaire) : il fallait sinon interroger les planches une par une. Essayé puis retiré :
   un champ `how` par ingrédient et le choix du « bois utile » d'après les arbres proches, qui répondaient à la
   question suivante avant qu'elle soit posée (le corps faisait lui-même le lien bûche -> planches).
   Les recettes sont des FAITS du jeu, pas des décisions : les donner n'est pas tricher (un joueur a le livre de
@@ -93,6 +116,11 @@ branché sur le VRAI jeu via Mineflayer. Projet d'apprentissage : l'utilisateur 
   vit une seule fois dans `movements.js` et toutes les compétences en héritent. Chercher la cause générale
   (ex. `not_collected` : pas « les feuilles », mais une cible qui BOUGE -> viser où l'objet atterrit).
   Seules exceptions : quelques instincts de sécurité (lave, chutes).
+- Les FAITS du jeu viennent du jeu, pas de listes écrites par nous : données de Mineflayer (dureté, outils,
+  recettes) et tags du serveur (`src/tags.js` : ce qui est remplaçable, les feuilles, les lits...). Nos listes
+  ne gardent que nos CHOIX (ce qu'on protège, ce qu'on évite, les blocs jetables, ce qu'on signale au LLM).
+  Un tag n'est pas toujours toute la règle : la neige est « remplaçable » mais le jeu n'en remplace qu'UNE
+  couche ; on essaie, et la vérification après coup le dit (cas d'arène).
 - Partage avec les têtes apprises de l'architecture hybride : le corps EXÉCUTE la mécanique (comment), le world
   model et les autres têtes CHOISISSENT (quand, quoi, quelle réaction). Les frictions de bas niveau se corrigent
   dans les compétences, pas en attendant un modèle plus fort : des compétences fiables rendent tous les modèles
@@ -111,6 +139,11 @@ branché sur le VRAI jeu via Mineflayer. Projet d'apprentissage : l'utilisateur 
   « Goal progress », termine l'épisode (`condition_met`) et refuse un `goal_reached` trop tôt. Sans condition
   (« construis un abri ») : `goal_reached` comme avant. `--no-condition` (agent, banc) pour comparer.
   Arguments PLATS : avec un objet imbriqué, qwen2.5:3b fermait mal les accolades et Ollama jetait l'appel.
+- Essayé puis RETIRÉ : demander une ou deux phrases de réflexion avant les appels (`--reasoning`). Sans effet
+  sur llama3.1:8b, et qwen2.5:14b écrivait alors ses appels en TEXTE (0 compétence en 10 tours ; 3/3 sans).
+  Le texte qu'un modèle écrit de lui-même à côté des appels n'est pas remis dans l'historique : les modèles de
+  prompt d'Ollama ne savent pas montrer texte ET appels (llama3.1 jette le texte, qwen2.5 jette les APPELS).
+  qwen2.5:14b l'écrit parfois en russe : sans effet, on ne le lit pas. Réponses bornées à `LLM_MAX_TOKENS` (600). Les sous-buts écrits par le LLM (`add_step`) ont été discutés et mis de côté.
   Les noms d'objets ne sont pas vérifiés (pas de liste dans Python) : erreur vue, « cook a beef » -> `beef`.
   (Avant : un seul outil `propose_plans` contenant une liste de compétences ; qwen2.5:3b appelait les compétences
   directement, Ollama jetait ces appels à des outils inconnus -> réponses vides.)
@@ -194,6 +227,7 @@ branché sur le VRAI jeu via Mineflayer. Projet d'apprentissage : l'utilisateur 
 8. Brancher le world model comme filtre, test A/B (avec/sans), et comparer petit/gros modèle.
 
 ### Pistes au-delà de l'étape 8 (projet long : liste OUVERTE, l'ordre est décidé par les mesures)
+Vue d'ensemble et ordre des étapes : `docs/architecture.md` (cette liste garde le détail des idées).
 Règle commune : un composant à la fois, mesuré avec/sans sur les bancs ; un composant appris s'AJOUTE (comprendre,
 prédire, choisir) et ne remplace pas une compétence déterministe fiable. Les idées ci-dessous sont des directions,
 pas des engagements ; en ajouter, en retirer selon ce que montrent les données.
@@ -245,19 +279,57 @@ pas des engagements ; en ajouter, en retirer selon ce que montrent les données.
   persistant : un lieu rejoué a perdu ses arbres), `--compare`. oak_logs (3 lieux, seed 1, 20/10/2026) :
   llama3.1:8b 3/3 (1-2 tours, choisit `mine`) ; qwen2.5:3b 3/3 avec condition (2, 2, 8 tours), 3/3 sans (3, 7, 7).
   Trop peu de lieux pour conclure ; la tâche n'est plus discriminante.
+- MESURE DU PLAFOND (crafting_table, seed 3, 21/10/2026) : qwen2.5:14b 3/3 (3 à 5 tours, ~1 min 30 par épisode :
+  recipe -> mine -> planches -> table, bouleau choisi seul quand il n'y a que ça) ; llama3.1:8b 0/7 et qwen2.5:3b
+  échouaient (craft de la table sans jamais faire les planches). Conclusion : l'architecture (compétences,
+  `recipe` à un niveau, condition de but) suffit à un modèle assez fort ; les échecs des petits modèles viennent
+  de leur taille. On ne règle plus le prompt pour eux : leurs échecs sont la référence que le world model doit
+  améliorer (étape 8). Le 14B tient sur le M2 16 Go avec le serveur (contexte 16k).
 - Corrigé cette session : nombres écrits en texte par Llama ("3"), condition de but (`goal.py`), `move_to` range 2
   par défaut, ramassage qui vise où l'objet ATTERRIT (`landingSpot` : cause de `not_collected`), "Digging aborted"
   en `dig_failed`, `cleared` remonté par collect_block et mine. Arène : move_to, break_block, collect_block,
   pick_up, mine passent ; `not_collected` n'a plus de cas d'arène (aucun montage déterministe trouvé).
 - Prochaines étapes, dans l'ordre :
-  1. Banc terrain : remplacer les lieux inaccessibles (graine 2 : 6 lieux sur 10 sautés, océans) comme le banc
-     d'épisodes, case libre pour place_block, puis 50 lieux sur une nouvelle graine.
-  2. Tâches plus longues au banc d'épisodes (crafting_table, wooden_pickaxe), ~10 lieux par variante.
+  1. Préparer la collecte pour le world model (étape 7) : commit, `MC_DATA_PURPOSE=collection`, bancs lancés en
+     série (qwen2.5:14b pour des épisodes réussis variés, petits modèles pour des échecs), puis premières têtes.
+  2. Banc terrain : case libre pour place_block, puis 50 lieux sur une nouvelle graine.
+     Tâches plus longues au banc d'épisodes (wooden_pickaxe), ~10 lieux par variante.
   3. Options de stratégie pour `move_to`/`explore` (`dig`, `build`, `max_drop`, `avoid_water`), primitive courte
      `step(direction, count)`, réflexe de déblocage générique.
   4. `brain/recovery.py` (règles), mesuré sur le banc avec/sans.
-  Petites corrections en attente : `max_tokens` pour borner une réponse qui s'emballe (vu : qwen > 5 min) ;
-  `context_length` non enregistré quand Ollama n'a pas encore chargé le modèle.
+  Petites corrections en attente : `context_length` non enregistré quand Ollama n'a pas encore chargé le modèle ;
+  une réponse inutilisable rejouée à l'identique (température basse, graine fixe : le message de correction ne
+  change rien) ; un `llm_error` (ex. modèle introuvable) compte comme un lieu joué au banc.
+- Corrigé aussi : `mine` cherchait à 32 blocs et `find` à 64 (block_not_found alors qu'une bûche était à 42) ;
+  banc d'épisodes : 100 tirages sur ±5000 blocs (les lieux joués sautés laissaient en tête les océans), un
+  océan refusé par le serveur échoue tout de suite (`setup.js`).
+- Compétences revues avant de figer (21/10/2026) : `place_block` accepte ce que le jeu remplace (tag
+  replaceable ET sans boîte de collision : herbe oui, fleurs et neige épaisse non) ; `break_block` a
+  `require_tool` (true par défaut ; false = casser sans l'outil, `no_drop`) ; `find`/`mine` acceptent un groupe
+  du jeu (`#logs`) ; fin du temps limite unique de 60 s (voir Conventions : budget, progrès, alertes) ; `mine`
+  plafonné par son budget (marche jusqu'au plus proche + ~5 s par bloc : ~18 blocs par appel). À décider : `explore` (max 256 -> 64 ?).
+  Arène après ces changements (21/10/2026) : toutes les suites passent (règles d'arrêt, tags, place_block).
+- `observe` revu (journal v8) : il garde TOUT ce que le client sait (le serveur envoie les blocs derrière les
+  murs) et MARQUE ce que le bot voit (ligne de vue dans toutes les directions : masque de la grille, `visible`
+  des entités). La perception = un masque sur la même ligne, pas un second format. Ajoutés : état des blocs,
+  objets au sol, bloc visé, vitesse/regard/objet tenu/nom des entités (pas leur santé), accroupi, sprint,
+  chute, XP, enchantements, biome, `perception`. Retirés : `block_below`, `block_front` (recalculables),
+  `notable_blocks` (vu à travers les murs), remplacé par `in_sight` : TOUS les types de blocs EN VUE à moins de
+  32 blocs, sans liste, par un éventail de ~18 000 rayons depuis les yeux (1,5° : un bloc à 32 blocs fait
+  ~1,8°), arrêtés au premier bloc opaque, comme un écran. Même calcul pour `scan` et le masque de la grille.
+  Notre DDA lit les chunks directement (~3x plus vite que le raycast de Mineflayer) ; 97 ms la première fois,
+  4 ms en cache (yeux immobiles, aucun bloc changé), x-ray 218 ms. Affiché au LLM (« In sight: », tous les types : une limite coupait les arbres).
+  Sans lui, le 14B cherchait du chêne dans une forêt d'épicéas (1/4 au lieu de 3/3).
+- Banc crafting_table, qwen2.5:14b, ligne de vue (21/10/2026) : 4/4 avec « In sight » (sight 2/2, x-ray 2/2),
+  puis 3/4 avec `#planks`/`uses`/`craftable` (2 forêts d'épicéas réussies du premier coup via `recipe("#planks")`).
+  L'échec : un plan écrit d'avance autour du chêne, rejoué 10 fois avec `spruce_log` en vue à 4 blocs (a priori
+  du modèle, pas un manque d'information : cas pour une tactique ou le world model). Le 14B enchaîne
+  maintenant de longs plans (jusqu'à `goal_reached`) : jugé positif, la boucle arrête au premier échec. Hostile = catégorie du jeu « Hostile mobs ».
+- Perception branchée (`src/perception.js`, `MC_PERCEPTION`, `POST /setup {perception}`) : `find`, `mine`
+  (via find), `scan` et la vue du LLM ne voient que la ligne de vue par défaut ; `bench --xray`,
+  `--compare sight`. Pas encore : la mémoire de ce qui a été vu ; le pathfinder planifie toujours avec tout
+  ce que le client sait (mécanique du corps) ; l'alerte `hostile_near` compte aussi un monstre derrière un
+  mur (un joueur l'entend). Grille : rayon 8 (17³ = 4913 cases, 11 Ko, +13 ms sur r5) ; au-delà, `in_sight` (32 blocs).
 - Le script de rejeu d'un moment de décision (plusieurs graines, sans le jeu) est dans le scratchpad : à intégrer
   à `brain/` si on en refait l'usage.
 

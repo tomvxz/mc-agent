@@ -4,6 +4,7 @@ import {
     movementFailureReason,
     round1,
     trackWorldChanges,
+    WALK_SPEED,
 } from "./utils.js";
 const { goals } = mineflayerPathfinder;
 
@@ -71,5 +72,8 @@ async function explore(bot, { direction, distance = 32 } = {}) {
     }
     return { success: true, reason: "ok", details: summary() };
 }
+
+// Estimated duration, for its time budget (runSkill.js): like walking `distance` blocks
+explore.budget = (bot, { distance = 32 }) => (1.5 * distance) / WALK_SPEED + 2;
 
 export default explore;

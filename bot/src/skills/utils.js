@@ -1,7 +1,7 @@
 // Small helpers shared by several skills (this is not a skill)
 import mineflayerPathfinder from "mineflayer-pathfinder";
 import { refuseIfCancelled } from "../cancel.js";
-import { SCAFFOLDING_BLOCKS } from "../movements.js";
+import { MAX_DROP_DOWN, SCAFFOLDING_BLOCKS } from "../movements.js";
 const { goals } = mineflayerPathfinder;
 
 // Wait ms milliseconds, in steps of at most 50 ms. In a skill stopped by its time limit, throws at
@@ -82,6 +82,40 @@ async function gotoWatched(bot, goal, stuckMs = STUCK_MS) {
         clearInterval(timer);
     }
 }
+
+// Estimated walking time (s) to a position, for skill budgets (runSkill.js): straight distance x 1.5
+// (paths are not straight) at walking speed, + 2 s to compute the path. Only a rough estimate: the
+// skill is stopped at 3x it.
+const WALK_SPEED = 4.3; // blocks per second, the game's walking speed
+function walkSeconds(bot, x, y, z) {
+    const d = bot.entity.position.distanceTo(makeVec3(bot, x, y, z));
+    return (1.5 * d) / WALK_SPEED + 2;
+}
+
+// walk moves without the pathfinder: the same instincts are checked here.
+// What is one step ahead in direction (dx, dz) (any length): null if safe, otherwise
+// { danger: "lava" | "drop" | "water" | "unloaded", ... }. "drop": no ground within MAX_DROP_DOWN below.
+function dangerAhead(bot, dx, dz) {
+    const n = Math.hypot(dx, dz);
+    if (n === 0) return null;
+    const p = bot.entity.position;
+    const x = Math.floor(p.x + (dx / n) * 0.8);
+    const z = Math.floor(p.z + (dz / n) * 0.8);
+    const y = Math.floor(p.y);
+    for (let dy = 1; dy >= -(MAX_DROP_DOWN + 1); dy--) {
+        const b = bot.blockAt(makeVec3(bot, x, y + dy, z));
+        if (!b) return { danger: "unloaded" };
+        if (b.name === "lava" || b.name === "fire") return { danger: "lava", block: b.name, position: [x, y + dy, z] };
+        if (dy > 0) continue; // head level: only lava matters here
+        if (b.name === "water") return { danger: "water", position: [x, y + dy, z] };
+        if (dy < 0 && b.boundingBox === "block") return null; // ground within reach
+        if (dy === 0 && b.boundingBox === "block") return null; // a step up, not a fall
+    }
+    return { danger: "drop", position: [x, y, z], min_depth: MAX_DROP_DOWN + 1 };
+}
+
+// The horizontal direction (dx, dz) Mineflayer's yaw faces (yaw 0 = north, -z; pi/2 = west)
+const facing = (yaw) => [-Math.sin(yaw), -Math.cos(yaw)];
 
 // Build a Vec3 (Mineflayer's 3D vector) by copying the bot's position and changing x, y, z
 function makeVec3(bot, x, y, z) {
@@ -218,7 +252,9 @@ async function walkOnto(bot, entity) {
 }
 
 export {
+    dangerAhead,
     droppedItem,
+    facing,
     dropsNear,
     gainedSince,
     gotoWatched,
@@ -232,4 +268,6 @@ export {
     waitUntil,
     landingSpot,
     walkOnto,
+    walkSeconds,
+    WALK_SPEED,
 };

@@ -116,7 +116,10 @@ def run_episode(
             if condition and goals.is_met(condition, start_state):
                 return finish(True, "condition_met")
 
-        first = {"role": "user", "content": render.render_goal(goal, start_state, progress(start_state))}
+        first = {
+            "role": "user",
+            "content": render.render_goal(goal, start_state, progress(start_state)),
+        }
         messages = [{"role": "system", "content": system}, first]
         new_messages = [
             first
@@ -175,7 +178,10 @@ def run_episode(
                 return finish(True, "done")
             if reply.done and not plan:  # with a condition: not met (it would have ended the episode)
                 feedback = answers(reply, [], catalogue, progress(shown_state)) + [
-                    {"role": "user", "content": render.render_new_state(shown_state, progress=progress(shown_state))}
+                    {
+                        "role": "user",
+                        "content": render.render_new_state(shown_state, progress=progress(shown_state)),
+                    }
                 ]
                 messages += feedback
                 new_messages += feedback
@@ -226,7 +232,10 @@ def run_episode(
             repeated = failure is not None and failure == last_failure
             last_failure = failure
             text = render.render_new_state(
-                state, previous_state=shown_state, repeated_failure=repeated, progress=progress(state)
+                state,
+                previous_state=shown_state,
+                repeated_failure=repeated,
+                progress=progress(state),
             )
             shown_state = state
             feedback = answers(reply, results, catalogue, progress(state)) + [

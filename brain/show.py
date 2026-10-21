@@ -44,7 +44,9 @@ def load_episodes(path: pathlib.Path) -> dict[str, list[dict[str, Any]]]:
 
 
 def load_transitions(path: pathlib.Path, episode_id: str) -> list[dict[str, Any]]:
-    """The transitions of one episode, in order (the file is big: lines are checked as text first)."""
+    """The transitions of one episode, in order (the file is big: lines are checked as text first).
+    Only the skills the brain asked for: the steps inside a skill (parent_seq, e.g. mine's
+    collect_block) are left out, so that each line matches one call of the plan."""
     if not path.exists():
         return []
     found = []
@@ -52,7 +54,7 @@ def load_transitions(path: pathlib.Path, episode_id: str) -> list[dict[str, Any]
         for line in f:
             if episode_id in line:
                 t = json.loads(line)
-                if t.get("episode_id") == episode_id:
+                if t.get("episode_id") == episode_id and "parent_seq" not in t:
                     found.append(t)
     return sorted(found, key=lambda t: t["seq"])
 
@@ -82,6 +84,13 @@ def show(
                 for m in event["new_messages"]:
                     text = m.get("content") or json.dumps(m.get("tool_calls"))
                     lines.append(f"  | {m['role']}: " + text.replace("\n", "\n  |   "))
+            message = (event.get("raw_response") or {}).get("choices", [{}])[0].get("message", {})
+            if not event.get("parse_error"):
+                # Text written next to the calls (unasked: not put back, llm.py), and a thinking model's own field
+                if message.get("reasoning"):
+                    lines.append(f"  (thinking) {_short(message['reasoning'])}")
+                if message.get("content"):
+                    lines.append(f"  thinks: {_short(message['content'])}")
             if goals.is_definition_turn(event) and not event.get("parse_error"):
                 condition, _ = goals.parse_condition(reply_from_openai(event["raw_response"]).calls)
                 lines.append(f"  goal condition: {condition['have'] if condition else 'none (not about items)'}")

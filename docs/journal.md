@@ -20,7 +20,7 @@ Each folder holds:
 | `episodes.jsonl` | Python (`brain/journal.py`) | one event of an LLM episode |
 
 Joins: transition -> run on `run_id` (versions, seed, server settings); transition -> episode on
-`episode_id` + `turn`; transitions of a run are ordered by `seq` (previous = `seq - 1`).
+`episode_id` + `turn`; transitions of a run are ordered by `seq` (start order; the steps inside a skill carry `parent_seq`).
 `MC_DATA_DIR` changes the `data/` root. Older lines (schemas 1-3) are development data: ignore them.
 
 ## Rules
@@ -71,13 +71,15 @@ Written once per run, right after the bot spawns: the run's fixed facts, not rep
 
 ## `transitions.jsonl`
 
-### Version 6 (current)
+### Version 8 (current)
 ```jsonc
 {
-  "schema_version": 6,
+  "schema_version": 8,
   // --- Identity (everything else about the run is in runs.jsonl)
   "run_id": "run-…",                    // null when no run was started (unit tests)
-  "seq": 17,                            // 0, 1, 2... within the run; the previous transition is seq - 1
+  "seq": 17,                            // 0, 1, 2... within the run, given when the skill STARTS
+  "parent_seq": 12,                     // only for a STEP: a skill called inside another one (mine ->
+                                        //   find, collect_block -> break_block, pick_up), see below
   "source": "brain",                    // who asked: brain, test:<skill>, test:field, manual, api...
   "episode_id": "ep-…", "turn": 0,      // only when the call comes from an LLM episode (which plan asked)
   // --- Time
@@ -90,7 +92,8 @@ Written once per run, right after the bot spawns: the run's fixed facts, not rep
     "args_resolved": { "count": 1, "block": "oak_log" } },  // + the catalogue's defaults
   // --- Before, during, after
   "state": { … },                       // observe() before (see below), or null if unavailable
-  "trace": { … },                       // what happened during the skill (see below), null for an unknown skill
+  "trace": { … },                       // what happened during the skill (see below), null for an unknown
+                                        //   skill and for a step (the slice of its top line's trace)
   "next_state": { … },                  // observe() after (+300 ms)
   // --- Result
   "success": true,
@@ -102,50 +105,88 @@ Written once per run, right after the bot spawns: the run's fixed facts, not rep
 }
 ```
 
+#### Steps: the skills called inside a skill
+A shortcut is an assembly of primitives: each primitive it calls gets its own line (`bot/src/steps.js`),
+so the world model also learns from short actions when the brain asked for `mine` 10. A step line has
+`parent_seq` (the seq of the skill that called it, which may itself be a step), the same `source`,
+`episode_id` and `turn`, its own `state`, `next_state`, result and times, and `trace: null`: its trace is
+the part of the top line's trace between its `tick_start` and `tick_end`. No 300 ms wait after a step.
+A step whose top skill was stopped ends with reason `stopped` (its next action was refused).
+Lines are written when a skill ENDS: a step's line comes before its parent's, and seq order = start order.
+The brain's tools (`brain/show.py`, `brain/bench.py`) read only the top lines (no `parent_seq`).
+
 #### `state` / `next_state`: the state (from `observe`)
-Every field may be `null` if it could not be read.
+Every field may be `null` if it could not be read. The state holds everything the CLIENT knows: the
+server sends every block of the loaded chunks and every entity around, walls or not. What the bot
+could SEE is marked (`blocks.visible`, `visible` of entities): a perception that sees only that is a
+mask over the same line, not a second format (`bot/src/perception.js`).
 ```jsonc
 {
+  "perception": "sight",                // how find, scan and the brain's view filter what is known:
+                                        //   "sight" = line of sight only, "all" = everything (x-ray)
   // Body
   "position": [1000.5, 202.0, 1000.5], "yaw": 3.142, "pitch": 0, "velocity": [0, -0.078, 0],
   "on_ground": true, "in_water": false, "in_lava": false, "on_fire": false,
-  "health": 20, "food": 20, "food_saturation": 5, "oxygen": null, "xp_level": 0,
-  "deaths": 0,                          // deaths since the bot process started (v5)
+  "sneaking": false, "sprinting": false, "sleeping": false,   // from the keys held (the client decides)
+  "fall_distance": 0,                   // blocks fallen since last on the ground or in a liquid (> 3: damage)
+  "health": 20, "food": 20, "food_saturation": 5, "oxygen": null,
+  "xp_level": 0, "xp_points": 0, "xp_progress": 0,    // points: total; progress: 0-1 to the next level
+  "deaths": 0,                          // deaths since the bot process started
   "effects": [{ "name": "Speed", "amplifier": 0, "duration": 600 }],
   // Inventory and equipment
-  "inventory": { "oak_log": 2 },                        // counts (main + hotbar)
-  "inventory_slots": [ { "slot": 36, "name": "wooden_pickaxe", "count": 1, "durability_left": 58 } ],
+  "inventory": { "oak_log": 2 },        // counts (main + hotbar): recomputable from inventory_slots,
+                                        //   kept on purpose (what the brain and the goal condition read)
+  "inventory_slots": [ { "slot": 36, "name": "wooden_pickaxe", "count": 1, "durability_left": 58,
+                         "enchantments": [{ "name": "efficiency", "level": 1 }] } ],   // every slot
   "held_slot": 0,                                       // selected hotbar slot (0-8)
   "held_item": { "name": "wooden_pickaxe", "count": 1, "durability_left": 58 },
   "armor": { "head": null, "chest": null, "legs": null, "feet": null },
   "off_hand": null,                                     // slots: null = empty
   // World
   "game_mode": "survival", "difficulty": "hard", "dimension": "overworld",
-  "biome": null, "biome_id": 28,
+  "biome": "desert", "biome_id": 14,    // name from the registry (the server's list)
   "light": 0, "sky_light": 15, "time_of_day": 1248, "day": 3, "moon_phase": 3,   // 0 = full moon
   "raining": false, "thunder": false,
+  // What the bot looks at: the crosshair within reach (4.5 blocks), and the entity within 3.5
+  "looking_at": { "block": "oak_log[axis=y]", "position": [1003, 202, 1000], "face": 4, "distance": 2.6 },
+  "looking_at_entity": null,            // an entity id, or null
   // Surroundings
   "entities": [                         // within 16 blocks, nearest first, at most 20; ids are stable in a run
-    { "id": 312, "name": "husk", "type": "hostile", "hostile": true, "offset": [4.0, 0, 0.5], "distance": 4.0 } ],
-  "block_below": "stone", "block_front": "air",
-  "notable_blocks": {                   // logs, ores, water, lava, crafting_table, furnace, chest, sand, gravel, clay
-    "oak_log": { "nearest": [3, 0, 1], "distance": 3.2, "r8": 2, "r16": 5, "r32": 9 } },
-  "notable_truncated": false,           // true if more than 5000 notable blocks were found
-  "blocks": {                           // 11x11x11 grid around the feet
+    { "id": 312, "name": "husk", "type": "hostile",
+      "hostile": true,                  // the game data's category "Hostile mobs" (neutral mobs included)
+      "offset": [4.0, 0, 0.5], "distance": 4.0, "velocity": [0, -0.078, 0], "yaw": 1.2,
+      "visible": true,                  // in line of sight from the eyes (its middle)
+      "held_item": { "name": "iron_shovel", "count": 1 },   // only if it holds something
+      "username": "Steve",              // only for players
+      "item": { "name": "oak_log", "count": 3 } } ],        // only for an item lying on the ground
+                                        // no health: a player does not see it
+  "in_sight": {                         // EVERY kind of block in sight within 32 blocks (no list): the cells a
+                                        //   fan of ~18,000 rays from the eyes crosses (1.5 degrees apart, every
+                                        //   direction), each ray stopping at the first opaque block; perception
+                                        //   "all": the same rays not stopping (x-ray). count = cells seen.
+    "spruce_log": { "count": 12, "nearest": [3.5, 0, 1.5], "distance": 3.8 } },
+  "blocks": {                           // 17x17x17 grid around the feet (radius 8)
     "origin": [1000, 202, 1000],        // the block the feet are in
-    "radius": 5,
-    "palette": ["air", "stone"],
-    "cells": [1, 1, …] }                // 1331 palette indexes (null = not loaded)
+    "radius": 8,
+    "palette": ["air", "stone", "oak_log[axis=y]"],   // block STATES, in the game's notation
+    "cells": [1, 1, …],                 // 4913 palette indexes (null = not loaded)
+    "visible": "AAAA…" }                // base64, one bit per cell: cell i is byte i >> 3, bit i & 7 (1 = seen)
 }
 ```
 Grid order: `for dy in -R..R, for dz in -R..R, for dx in -R..R`, i.e.
 `index = (dy+R)*S*S + (dz+R)*S + (dx+R)` with `S = 2R+1`. Cell `(dx, dy, dz)` is the block at
-`origin + (dx, dy, dz)`; `dy = -1` is the block under the feet.
+`origin + (dx, dy, dz)`; `dy = -1` is the block under the feet (the block below and the one in front
+are read there: not stored).
+
+Visibility (360 degrees, as if the bot looked around): a block hides what is behind it when the game
+data says it is not `transparent` and it is a full block (stone yes; leaves, glass, water, grass no).
+`blocks.visible` and `in_sight` come from the same fan of rays (`bot/src/perception.js`): a cell is
+seen if a ray crosses it (empty cells too: seen empty space is known). `find`, which looks for one kind
+up to 64 blocks, checks each candidate with its own rays (faces turned to the eyes).
 
 Known gaps: `oxygen` is `null` until the server first reports it (it only sends it when it
-changes, usually underwater). `biome` is `null` when Mineflayer has no name for the biome id;
-`biome_id` is the raw id then (its mapping to names is not verified for this server).
-Only loaded chunks are seen (view distance 3: about 48 blocks around the bot).
+changes, usually underwater). Only loaded chunks are known (view distance 3: about 48 blocks around
+the bot).
 
 #### `trace`: what happened during the skill
 Time series are stored as columns: `{ "fields": [...], "rows": [[...], ...] }`. `ms` = milliseconds
@@ -158,7 +199,7 @@ since the start of the skill.
   "actions": [ { "ms": 850, "packet": "block_dig", "status": 0, "location": [1003, 202, 1000], "face": 1 } ],
   "blocks": { "fields": ["ms","x","y","z","from","to"], "rows": [[2100, 1003, 202, 1000, "oak_log", "air"]] },
   "entities": { "fields": ["ms","id","name","x","y","z"], "rows": [[0, 312, "husk", 1004.5, 202, 1000.5]] },
-  "truncated": []                       // names of the parts that hit their cap (events 500, body 2400,
+  "truncated": []                       // names of the parts that hit their cap (events 500, body 6000,
 }                                       //   actions 1000, blocks 2000, entities 6000)
 ```
 - **`body.controls`**: the control keys held at that tick, as bits: forward 1, back 2, left 4,
@@ -191,7 +232,7 @@ since the start of the skill.
 ### Derived at load time (do NOT add these to the journal)
 | Field | Computed from |
 |---|---|
-| transition id, previous transition | `run_id` + `seq` |
+| transition id, previous transition | `run_id` + `seq` (previous at the same level: the nearest smaller `seq` with the same `parent_seq`) |
 | code version (git commit), world, bot, seed, tick rate at start | `runs.jsonl` via `run_id` |
 | step within an episode | order of `seq` among lines with the same `episode_id` |
 | items gained / lost, health / food change | `next_state` - `state` |
@@ -207,6 +248,9 @@ since the start of the skill.
 (`timed_out` is the one exception kept on purpose: it equals `reason == "timeout"` but makes filters readable.)
 
 ### Earlier versions (October 2026, development data only)
+v7: the state had `notable_blocks` (logs, ores... within 32 blocks, seen through walls), `block_below`, `block_front`, block names without their state in the grid, no
+visibility, no `looking_at`, fewer body and entity fields, a hand-made hostile list; `biome` always null.
+v6: v7 without step lines and `parent_seq`; `seq` was given when the line was written (at the end).
 v5: v6 + `context` (path probes measured before acting), `continuous`, `discontinuities`,
 `interventions`, `interventions_before`, `discontinuities_before`, `trace_before` (what happened
 between two skills). Removed in v6 to keep only what helps to understand a skill now.
@@ -245,7 +289,7 @@ program crashes mid-episode). Every event has:
   "goal": "craft a wooden pickaxe",
   "scenario": "arena:trees_3",                // optional: the task setting
   "model": { "provider": "openai_compatible", "base_url": "http://127.0.0.1:11434/v1", "name": "qwen2.5:3b",
-             "params": { "temperature": 0.2, "seed": 42,
+             "params": { "temperature": 0.2, "seed": 42, "max_tokens": 600,
                          "context_length": 16384 } },   // as loaded by the server (null if unknown);
                                                         //   past it the server cuts the conversation
   "code_version": "6fc30a3",                  // the git commit (+dirty if uncommitted changes)
@@ -293,6 +337,9 @@ Messages use the OpenAI chat format:
 { "role": "tool", "tool_call_id": "call_ab12", "content": "find(target='oak_log'): ok {…}" }  // one per call
 ```
 An unusable answer is put back as `{ "role": "assistant", "content": "<its text>" }`.
+Text written next to the calls (some models write some, unasked) is not put back: `content` is `""`
+when there are `tool_calls` (Ollama's templates cannot show both). It stays in `raw_response` only,
+like a thinking model's own reasoning field.
 
 `episode_end`, written once, also after a crash when possible:
 ```jsonc

@@ -2,6 +2,7 @@
 
 import json
 
+from brain import render
 from brain.agent import run_episode
 from brain.llm import FakeLLM
 from brain.tests.fakes import FakeBody, failed, ok
@@ -163,3 +164,18 @@ def test_a_death_between_turns_is_reported(tmp_path):
     llm = FakeLLM([plan(("mine", {"block": "oak_log"})), plan(done=True)])
     run_episode("wood", body.client(), llm, episodes_file=tmp_path / "e.jsonl")
     assert "WARNING: you died" in llm.calls[1][-1]["content"]
+
+
+def test_text_next_to_the_calls_is_shown_but_not_put_back(tmp_path):
+    from brain.show import load_episodes, show
+
+    llm = FakeLLM([
+        {**plan(("mine", {"block": "oak_log"})), "text": "No logs yet: I mine some."},
+        plan(done=True),
+    ])
+    path = tmp_path / "e.jsonl"
+    outcome = run_episode("wood", FakeBody(lambda n, a: ok()).client(), llm, episodes_file=path)
+
+    answer = next(m for m in llm.calls[1] if m["role"] == "assistant")
+    assert answer["content"] == "" and answer["tool_calls"]  # templates cannot show both (llm.py)
+    assert "thinks: No logs yet: I mine some." in show(load_episodes(path)[outcome["episode_id"]], [])

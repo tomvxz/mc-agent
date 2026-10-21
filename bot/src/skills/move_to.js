@@ -5,6 +5,7 @@ import {
     movementFailureReason,
     round1,
     trackWorldChanges,
+    walkSeconds,
 } from "./utils.js";
 const { goals } = mineflayerPathfinder;
 
@@ -25,7 +26,7 @@ async function move_to(bot, { x, y, z, range = 2 } = {}) {
     const target = [x, y, z];
 
     // 2. A target INSIDE a solid block (e.g. a log) cannot be reached with a small range: fail at
-    //    once instead of searching for 60 s (seen with the LLM). Next to it: range >= 2, or mine.
+    //    once instead of searching until the time limit (seen with the LLM). Next to it: range >= 2, or mine.
     const cell = bot.blockAt(
         makeVec3(bot, Math.floor(x), Math.floor(y), Math.floor(z)),
     );
@@ -66,5 +67,8 @@ async function move_to(bot, { x, y, z, range = 2 } = {}) {
         return { success: false, reason: "not_arrived", details: arrival };
     return { success: true, reason: "ok", details: arrival };
 }
+
+// Estimated duration, for its time budget (runSkill.js)
+move_to.budget = (bot, { x, y, z }) => walkSeconds(bot, x, y, z);
 
 export default move_to;

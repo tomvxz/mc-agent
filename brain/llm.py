@@ -11,6 +11,7 @@ configured by environment variables:
     LLM_MODEL        default qwen2.5:3b                 (small, runs on a Mac M2)
     LLM_TEMPERATURE  default 0.2
     LLM_SEED         default 42
+    LLM_MAX_TOKENS   default 600 (an answer is cut there: seen, qwen2.5:3b writing for over 5 min)
 
 EACH SKILL IS A TOOL (render.skill_tools), plus two tools that are not skills: goal_reached and
 missing_capability. The tool calls of one answer, in order, are the plan.
@@ -80,6 +81,10 @@ class LLMReply:
             return {"role": "assistant", "content": self.text or ""}
         return {
             "role": "assistant",
+            # Never the text next to the calls: Ollama's templates cannot show both. llama3.1 drops
+            # the text, qwen2.5 drops the CALLS (`if .Content ... else if .ToolCalls`): the model
+            # would then see past answers without calls and stop calling tools. The text stays in
+            # raw_response.
             "content": "",
             "tool_calls": [
                 {
@@ -281,6 +286,7 @@ class OpenAICompatibleLLM:
             else float(os.environ.get("LLM_TEMPERATURE", "0.2"))
         )
         self.seed = seed if seed is not None else int(os.environ.get("LLM_SEED", "42"))
+        self.max_tokens = int(os.environ.get("LLM_MAX_TOKENS", "600"))
         # trust_env=False: the server is local, never go through a proxy (see brain/body.py)
         self._client = httpx.Client(
             base_url=self.base_url, timeout=REQUEST_TIMEOUT, trust_env=False
@@ -314,6 +320,7 @@ class OpenAICompatibleLLM:
             "params": {
                 "temperature": self.temperature,
                 "seed": self.seed,
+                "max_tokens": self.max_tokens,
                 "context_length": self.context_length(),
             },
         }
@@ -327,6 +334,7 @@ class OpenAICompatibleLLM:
             "tools": tools,
             "temperature": self.temperature,
             "seed": self.seed,
+            "max_tokens": self.max_tokens,
         }
         start = time.monotonic()
         try:
@@ -358,8 +366,8 @@ class OpenAICompatibleLLM:
 
 class FakeLLM:
     """A scripted LLM for tests: returns the given answers in order. A dict
-    {"plan": [{"skill", "args"}], "done", "missing_capability"} becomes tool calls; a string is a
-    text answer."""
+    {"plan": [{"skill", "args"}], "done", "missing_capability"} becomes tool calls (with "text":
+    the text written next to them); a string is a text answer."""
 
     def __init__(self, answers: list[dict[str, Any] | str]):
         self.answers = list(answers)
@@ -382,7 +390,7 @@ class FakeLLM:
             calls, _ = calls_from_plan(answer)
             message = {
                 "role": "assistant",
-                "content": None,
+                "content": answer.get("text"),
                 "tool_calls": [
                     {
                         "id": f"call_{len(self.calls)}_{i}",

@@ -1,6 +1,7 @@
 # Project map
 
-One page to find your way. Details: `CLAUDE.md` (rules and roadmap), `docs/journal.md` (data format).
+One page to find your way. Details: `CLAUDE.md` (rules and roadmap), `docs/journal.md` (data format),
+`docs/architecture.md` (the target architecture and the stages to get there).
 
 ## The idea in one picture
 ```
@@ -20,7 +21,8 @@ The brain never talks to Minecraft. The body handles reflexes and the details in
 When the brain asks `mine(oak_log, 3)`:
 1. `bot/src/api.js`: receives `POST /execute`, checks the request, one skill at a time.
 2. `bot/src/execute.js`: state before (`observe`), runs the skill while recording a trace, state after, writes one line.
-3. `bot/src/runSkill.js`: 60 s time limit, catches errors, really stops a timed-out skill (`cancel.js`).
+3. `bot/src/runSkill.js`: when a skill is stopped (its own time budget, no progress for 15 s, an alert: hurt or a
+   new monster close, a 300 s hard cap), catches errors, really stops a stopped skill (`cancel.js`).
 4. `bot/src/skills/mine.js`: repeats `find` + `collect_block` until 3 logs are collected.
 5. `bot/src/skills/collect_block.js`: `break_block` (gets a viewpoint, digs) then `pick_up` (walks onto the items).
 
@@ -40,6 +42,8 @@ On the Python side, `brain/agent.py` is the loop: state -> prompt -> LLM -> plan
 | `src/movements.js` | pathfinder settings: jumps, digs a passage, pillars up, avoids lava and monsters |
 | `src/fixes.js` | fixes for Mineflayer bugs (window clicks, difficulty, freezing against walls) |
 | `src/commands.js` | `runCommand`: send a server command (/tp, /give...) |
+| `src/perception.js` | what the bot perceives: line of sight (default) or everything the client knows (x-ray); used by find, scan, the state's visibility marks |
+| `src/tags.js` | the game's block tags sent by the server (replaceable, leaves, beds...): game facts, not our lists |
 | `src/setup.js` | starting situation for the benches (place, inventory, day): `POST /setup`, field bench |
 | `src/run.js`, `version.js`, `logger.js` | run id, versions, where the journal is written |
 | `src/skills/catalogue.js` | what the LLM reads about each skill: description, parameters, failure reasons |

@@ -1,5 +1,14 @@
 import { CENTER as C, giveAndWait, placeAndWait } from "./arena.js";
 
+// A block in the cell where the bot will place (plants need a grass block below, the floor is stone).
+// It checks the game's rule for minecraft:replaceable (src/tags.js) in the real game.
+const putInCell = (dx, dz, block, name = block) => async (bot) => {
+    await giveCobblestone(bot);
+    const [x, z] = [C.x + dx, C.z + dz];
+    await placeAndWait(bot, `/setblock ${x} ${C.y - 1} ${z} grass_block`, [x, C.y - 1, z], "grass_block");
+    await placeAndWait(bot, `/setblock ${x} ${C.y} ${z} ${block}`, [x, C.y, z], name);
+};
+
 const giveCobblestone = (bot) => giveAndWait(bot, "cobblestone", 5);
 
 // Check in the real world that the block is placed
@@ -44,7 +53,32 @@ nominal.push({
     verify: isPlaced(C.x + 4, C.y + 1, C.z + 4),
 });
 
+// What a player can place onto: the game replaces grass and ONE layer of snow
+for (const [dx, dz, block, name] of [
+    [3, 2, "short_grass", "short_grass"],
+    [-3, 2, "snow[layers=1]", "snow"],
+]) {
+    nominal.push({
+        name: `onto ${block}`,
+        setup: putInCell(dx, dz, block, name),
+        args: { item: "cobblestone", x: C.x + dx, y: C.y, z: C.z + dz },
+        verify: isPlaced(C.x + dx, C.y, C.z + dz),
+    });
+}
+
 const edgeCases = [
+    {
+        name: "a flower is not replaced",
+        setup: putInCell(-3, -3, "poppy"),
+        args: { item: "cobblestone", x: C.x - 3, y: C.y, z: C.z - 3 },
+        expect: "occupied",
+    },
+    {
+        name: "deep snow is not replaced (in the tag, but only one layer is: it has a collision box)",
+        setup: putInCell(3, -3, "snow[layers=3]", "snow"),
+        args: { item: "cobblestone", x: C.x + 3, y: C.y, z: C.z - 3 },
+        expect: "occupied",
+    },
     {
         name: "occupied cell",
         setup: async (bot) => {

@@ -46,13 +46,13 @@ test("if observe throws (bot disconnected), the transition is still written with
   assert.strictEqual(d.reason, "unknown_block");
 });
 
-test("v6 line: minimal identity, times, args_resolved, result", async () => {
+test("v8 line: minimal identity, times, args_resolved, result", async () => {
   await execute(fakeBot(), "find", { target: "oak_log" }, "unit", {
     episode_id: "ep-1",
     turn: 0,
   });
   const d = last();
-  assert.strictEqual(d.schema_version, 6);
+  assert.strictEqual(d.schema_version, 8);
   assert.deepStrictEqual([d.source, d.episode_id, d.turn], ["unit", "ep-1", 0]);
   assert.strictEqual(typeof d.seq, "number");
   // Run-level facts are not repeated on every line (they are in runs.jsonl)
@@ -77,7 +77,7 @@ test("v6 line: minimal identity, times, args_resolved, result", async () => {
     count: 5,
     max_distance: 64,
   }); // defaults applied
-  assert.deepStrictEqual(d.details, { target: "oak_log", max_distance: 64 }); // details of not_found
+  assert.deepStrictEqual(d.details, { target: "oak_log", max_distance: 64, perception: "sight" }); // details of not_found
   // Removed in v6 (only useful to the future world model)
   for (const field of [
     "context",
@@ -92,11 +92,11 @@ test("v6 line: minimal identity, times, args_resolved, result", async () => {
   assert.deepStrictEqual([d.timed_out, d.error], [false, null]);
 });
 
-test("state and next_state share one full format (observe), with an 11x11x11 grid", async () => {
+test("state and next_state share one full format (observe), with a 17x17x17 grid", async () => {
   await execute(fakeBot({ inventory: { bread: 2 } }), "scan", {}, "unit");
   const d = last();
   for (const s of [d.state, d.next_state]) {
-    assert.strictEqual(s.blocks.cells.length, 1331);
+    assert.strictEqual(s.blocks.cells.length, 4913);
     assert.deepStrictEqual(s.blocks.palette, ["air"]);
     assert.deepStrictEqual(s.inventory, { bread: 2 });
     assert.strictEqual(s.difficulty, "easy");
@@ -230,4 +230,21 @@ test("a timeout tells the brain what changed in the inventory (computed, not log
   const after = { inventory: { oak_log: 12, bamboo: 69 } };
   assert.deepStrictEqual(inventoryChange(before, after), { oak_log: 8, dirt: -2, bamboo: 69 });
   assert.deepStrictEqual(inventoryChange(null, after), { oak_log: 12, bamboo: 69 });
+});
+
+test("the steps inside a shortcut get their own lines, linked by parent_seq, without a trace", async () => {
+  // collect_block on nothing: its break_block step fails (nothing_to_break), and so does it
+  const bot = fakeBot();
+  await execute(bot, "collect_block", { x: 1, y: 100, z: 0 }, "unit", { episode_id: "ep-2", turn: 3 });
+  const [stepLine, top] = lines().slice(-2); // the step ends first, so it is written first
+  assert.deepStrictEqual(
+    [top.skill.name, top.reason, top.parent_seq],
+    ["collect_block", "nothing_to_break", undefined],
+  );
+  assert.deepStrictEqual(
+    [stepLine.skill.name, stepLine.reason, stepLine.parent_seq, stepLine.trace],
+    ["break_block", "nothing_to_break", top.seq, null],
+  );
+  assert.ok(stepLine.seq > top.seq); // seq is given at the start
+  assert.deepStrictEqual([stepLine.episode_id, stepLine.turn, stepLine.source], ["ep-2", 3, "unit"]);
 });

@@ -3,6 +3,7 @@
 
 import { EventEmitter } from 'node:events'
 import minecraftData from 'minecraft-data'
+import { recordTags } from '../../src/tags.js'
 // The Minecraft version comes from .env (MC_VERSION), never written here: npm test reads ../.env
 const MC_VERSION = process.env.MC_VERSION
 if (!MC_VERSION) throw new Error('MC_VERSION is missing: run the tests with npm test (it reads ../.env)')
@@ -29,13 +30,53 @@ class Point {
     equals(p) { return this.x === p.x && this.y === p.y && this.z === p.z }
 }
 
+// The block tags the server sends at login (src/tags.js), as read from Paper 1.21.11 on 2026-10-21.
+// Beds, doors and fence gates: every block with that suffix (same lists as the server's).
+const names = Object.keys(registry.blocksByName)
+const TAGS = {
+    air: ['air', 'void_air', 'cave_air'],
+    replaceable: ['air', 'water', 'lava', 'short_grass', 'fern', 'dead_bush', 'bush', 'short_dry_grass', 'tall_dry_grass',
+        'seagrass', 'tall_seagrass', 'fire', 'soul_fire', 'snow', 'vine', 'glow_lichen', 'resin_clump', 'light', 'tall_grass',
+        'large_fern', 'structure_void', 'void_air', 'cave_air', 'bubble_column', 'warped_roots', 'nether_sprouts',
+        'crimson_roots', 'leaf_litter', 'hanging_roots'],
+    leaves: names.filter((n) => n.endsWith('_leaves')),
+    ...Object.fromEntries(['coal', 'iron', 'copper', 'gold', 'redstone', 'lapis', 'diamond', 'emerald'].map((m) =>
+        [`${m}_ores`, [`${m}_ore`, `deepslate_${m}_ore`]])),
+    sand: ['sand', 'red_sand'],
+    logs: names.filter((n) => n.endsWith('_log')), // the real one also has wood, stems...: enough here
+    beds: names.filter((n) => n.endsWith('_bed')),
+    doors: names.filter((n) => n.endsWith('_door')),
+    fence_gates: names.filter((n) => n.endsWith('_fence_gate')),
+}
+// Item tags (as the server sends them, 2026-10-21): enough for recipes
+const items = Object.keys(registry.itemsByName)
+const WOODS = ['oak', 'spruce', 'birch', 'jungle', 'acacia', 'dark_oak', 'pale_oak', 'mangrove', 'cherry']
+const ITEM_TAGS = {
+    planks: items.filter((n) => n.endsWith('_planks')),
+    logs: WOODS.flatMap((w) => [`${w}_log`, `${w}_wood`, `stripped_${w}_log`, `stripped_${w}_wood`]),
+    ...Object.fromEntries(WOODS.map((w) => [`${w}_logs`, [`${w}_log`, `${w}_wood`, `stripped_${w}_log`, `stripped_${w}_wood`]])),
+}
+const TAGS_PACKET = {
+    tags: [{
+        tagType: 'minecraft:block',
+        tags: Object.entries(TAGS).map(([name, blocks]) => ({
+            tagName: `minecraft:${name}`, entries: blocks.map((n) => registry.blocksByName[n].id),
+        })),
+    }, {
+        tagType: 'minecraft:item',
+        tags: Object.entries(ITEM_TAGS).map(([name, list]) => ({
+            tagName: `minecraft:${name}`, entries: list.map((n) => registry.itemsByName[n].id),
+        })),
+    }],
+}
+
 // options: { inventory: { bread: 2 }, food: 20, blocks: { '0,0,0': 'stone' }, entities: [...] }
 function fakeBot(options = {}) {
     const inventory = Object.entries(options.inventory || {}).map(([name, count]) => ({ name, count, type: registry.itemsByName[name].id }))
     const blocks = options.blocks || {}
 
     // Object.assign onto an EventEmitter: the fake bot supports bot.on(...) like the real one
-    return Object.assign(new EventEmitter(), {
+    const bot = Object.assign(new EventEmitter(), {
         registry,
         username: 'Agent',
         food: options.food ?? 20,
@@ -56,10 +97,13 @@ function fakeBot(options = {}) {
             const info = registry.blocksByName[name]
             return {
                 name, type: info.id, position: p, diggable: info.diggable, harvestTools: info.harvestTools,
-                boundingBox: info.boundingBox, hardness: info.hardness,
+                boundingBox: info.boundingBox, hardness: info.hardness, transparent: info.transparent, stateId: info.defaultState,
+                shapes: info.boundingBox === 'block' ? [[0, 0, 0, 1, 1, 1]] : [], // simplified: full or none
             }
         },
         findBlock: () => null,
+        // No line of sight is computed: nothing hides anything (tests that need it set their own)
+        world: { raycast: () => null },
         // Really searches `blocks` (matching = one id or a list of ids)
         findBlocks: ({ matching, maxDistance }) => {
             const ids = [].concat(matching)
@@ -87,7 +131,12 @@ function fakeBot(options = {}) {
         equip: async () => { throw new Error('equip should not be called') },
         consume: async () => { throw new Error('consume should not be called') },
         dig: async () => { throw new Error('dig should not be called') },
+        look: async (yaw, pitch) => { bot.entity.yaw = yaw; bot.entity.pitch = pitch },
     })
+    // Like the real bot: the tags arrive at login
+    recordTags(bot)
+    bot._client.emit('tags', TAGS_PACKET)
+    return bot
 }
 
 export { fakeBot, Point, MC_VERSION }

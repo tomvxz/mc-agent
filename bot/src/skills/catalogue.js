@@ -11,6 +11,7 @@ const SHOWN_TO_LLM = [
     "mine",
     "craft",
     "recipe",
+    "craftable",
     "place_block",
     "explore",
 ];
@@ -18,8 +19,17 @@ const SHOWN_TO_LLM = [
 // Reasons possible for EVERY skill (added by runSkill and execute)
 const COMMON_REASONS = {
     timeout:
-        "the skill exceeded its time limit (60 s) and was stopped; details.inventory_change: what it had " +
-        "gathered or used before being stopped",
+        "the skill took much longer than expected and was stopped (details.seconds); details.inventory_change: " +
+        "what it had gathered or used before being stopped",
+    no_progress:
+        "the skill was stopped: nothing moved, was dug or changed in the inventory for 15 s; " +
+        "details.inventory_change: what it had done before",
+    alert:
+        "the skill was stopped because the bot was hurt or a monster came close (details.trigger): " +
+        "decide what to do first; details.inventory_change: what it had done before",
+    too_long:
+        "refused before starting: it would take too long (details.estimated_seconds, more than details.max_seconds), " +
+        "e.g. too many blocks at once: split it into several calls",
     exception: "unexpected error in the code (details.error)",
     bad_result: "the skill returned a malformed result (bug)",
     unknown_skill: "no skill has this name",
@@ -83,16 +93,26 @@ const CATALOGUE = {
             "details.drops tells what fell on the ground (pick_up gets it), details.collected what came straight into the inventory.",
         parameters: {
             type: "object",
-            properties: { ...COORDS },
+            properties: {
+                ...COORDS,
+                require_tool: {
+                    type: "boolean",
+                    description:
+                        "true: refuse a block that drops nothing without the right tool (stone without a pickaxe). " +
+                        "false: break it anyway to clear a way, slower, nothing drops (details.no_drop)",
+                    default: true,
+                },
+            },
             required: ["x", "y", "z"],
         },
         reasons: {
-            invalid_args: "missing coordinates or not integers",
+            invalid_args: "missing coordinates or not integers, or require_tool not true/false",
             not_loaded: "this area is not loaded (too far)",
             nothing_to_break: "there is only air or a liquid at this position",
             unbreakable: "unbreakable block (bedrock, barrier)",
             no_tool:
-                "this block requires a tool missing from the inventory (details.tools, e.g. a pickaxe for stone)",
+                "this block requires a tool missing from the inventory (details.tools, e.g. a pickaxe for stone); " +
+                "require_tool false breaks it anyway, without drop",
             ...MOVEMENT,
             dig_failed: "the block did not break",
         },
@@ -127,7 +147,8 @@ const CATALOGUE = {
     place_block: {
         kind: "primitive",
         description:
-            "Place a block from the inventory at a position. The cell must be empty and touch a solid block " +
+            "Place a block from the inventory at a position. The cell must be free (air, or what the game replaces: " +
+            "grass, ferns, water, one layer of snow; not flowers) and touch a solid block " +
             "(floor, wall...). The bot walks there on its own.",
         parameters: {
             type: "object",
@@ -170,8 +191,8 @@ const CATALOGUE = {
             unknown_item: "this name is not an item",
             no_recipe: "this item cannot be crafted (it is found or obtained some other way)",
             missing_ingredients:
-                "some ingredients are missing (details.ingredients: required and owned counts of each; any_X " +
-                "means one of the items in one_of); recipe tells what an ingredient is made of",
+                "some ingredients are missing (details.ingredients: the item, or one_of = any one of these items, " +
+                "with required and owned counts); recipe tells what an ingredient is made of",
             no_crafting_table:
                 "the recipe needs a crafting_table and there is none within 32 blocks (details.ingredients: what it needs)",
             ...MOVEMENT,
@@ -200,30 +221,46 @@ const CATALOGUE = {
     recipe: {
         kind: "question",
         description:
-            "Ask what an item is crafted from (changes nothing in the world): the ingredients of one craft " +
-            "(details.ingredients; any_X means one of the items in one_of), how many items it makes, and whether " +
-            "a crafting_table is needed. Only this item: ask again for an ingredient. Crafting only, not smelting.",
+            "The recipe book (changes nothing in the world), one level, both ways. item: what it is crafted from: the " +
+            "ingredients of one craft (details.ingredients: the item, or one_of = any one of these items, with group = " +
+            "the game's group of them, e.g. '#planks'), how many items it makes, whether a crafting_table is needed. " +
+            "item can be a group ('#planks'): the recipe of each of its items. uses: what is crafted directly FROM an " +
+            "item or a group (e.g. 'birch_log', '#logs'). Ask again for the next level. Crafting only, not smelting.",
         parameters: {
             type: "object",
-            properties: { item: string("item name, e.g. 'crafting_table', 'wooden_pickaxe'") },
-            required: ["item"],
+            properties: {
+                item: string("item or group to craft, e.g. 'crafting_table', '#planks'"),
+                uses: string("instead of item: an item or group to craft FROM, e.g. 'birch_log'"),
+            },
+            required: [],
         },
         reasons: {
-            invalid_args: "missing item",
-            unknown_item: "this name is not an item",
+            invalid_args: "give item or uses (one of them, a name)",
+            unknown_item: "this name is neither an item nor a game group of items",
             no_recipe: "this item cannot be crafted: it is gathered or obtained some other way",
+            no_use: "nothing is crafted directly from it",
         },
+    },
+    craftable: {
+        kind: "question",
+        description:
+            "What can be crafted NOW with the inventory, like the recipe book's 'craftable' filter (changes nothing " +
+            "in the world): details.now (in the inventory's 2x2 grid), details.with_table (needs a crafting_table; " +
+            "table_near: one within 32 blocks), with how many items one craft makes.",
+        parameters: { type: "object", properties: {}, required: [] },
+        reasons: { nothing_craftable: "the inventory allows no craft at all, even with a table (details.table_near)" },
     },
     find: {
         kind: "question",
         description:
             "Find the nearest blocks or entities (changes nothing in the world). target: a block name " +
-            "('oak_log'), an entity name ('cow') or 'hostile' for every monster. Only sees the loaded area around the bot. " +
+            "('oak_log'), a game group of blocks starting with # ('#logs' = any log, '#iron_ores'; details.matches " +
+            "then say which block), an entity name ('cow') or 'hostile' for every monster. Only sees the loaded area around the bot. " +
             "details.matches is sorted nearest first.",
         parameters: {
             type: "object",
             properties: {
-                target: string("block name, entity name, or 'hostile'"),
+                target: string("block name, game group of blocks ('#logs'), entity name, or 'hostile'"),
                 count: {
                     type: "integer",
                     description: "maximum number of results (1 to 50)",
@@ -239,15 +276,15 @@ const CATALOGUE = {
         },
         reasons: {
             invalid_args: "missing target, or count / max_distance out of bounds",
-            unknown_target: "this name is neither a block, nor an entity, nor 'hostile'",
+            unknown_target: "this name is neither a block, nor a game group of blocks, nor an entity, nor 'hostile'",
             not_found: "nothing like that in range: try explore, then search again",
         },
     },
     scan: {
         kind: "question",
         description:
-            "Summary of what surrounds the bot (changes nothing in the world): logs, ores, water, lava, " +
-            "crafting_table, furnace, chest, sand, gravel, clay, and every entity, with their count and the nearest position.",
+            "Summary of what the bot sees around it (changes nothing in the world): every kind of block in sight " +
+            "and every entity in sight, with their count and the nearest position.",
         parameters: {
             type: "object",
             properties: {
@@ -294,6 +331,60 @@ const CATALOGUE = {
             ...MOVEMENT,
         },
     },
+    walk: {
+        kind: "low_level",
+        description:
+            "Walk STRAIGHT a few blocks in a direction, without searching a path: jumps up one-block steps, " +
+            "stops in front of a wall, a drop of more than 3 blocks, water or lava. A short way out when " +
+            "move_to is stuck. yaw in radians, as in the state: 0 = north (-z), pi/2 = west, -pi/2 = east, pi = south.",
+        parameters: {
+            type: "object",
+            properties: {
+                yaw: number("direction in radians (0 = north, pi/2 = west)"),
+                distance: { type: "number", description: "blocks to walk (8 at most)", default: 1 },
+            },
+            required: ["yaw"],
+        },
+        reasons: {
+            invalid_args: "yaw is not a number, or distance not between 0 and 8",
+            blocked: "a wall (details.obstacle) or something that stops the bot is in the way",
+            danger_ahead: "lava, water, a drop of more than 3 blocks or an unloaded area ahead (details.danger)",
+        },
+    },
+    look: {
+        kind: "low_level",
+        description:
+            "Turn the head: yaw and pitch in radians, as in the state (yaw 0 = north, pi/2 = west; pitch 0 = level, " +
+            "positive = up). Sets the direction of press.",
+        parameters: {
+            type: "object",
+            properties: {
+                yaw: number("horizontal angle in radians"),
+                pitch: { type: "number", description: "vertical angle in radians, -pi/2 to pi/2", default: 0 },
+            },
+            required: ["yaw"],
+        },
+        reasons: { invalid_args: "yaw or pitch is not a number, or pitch beyond pi/2" },
+    },
+    press: {
+        kind: "low_level",
+        description:
+            "Hold keys for a number of game ticks (20 per second), then release them: forward, back, left, right " +
+            "(relative to where the bot looks), jump, sprint, sneak. Raw input: no safety check (walk has them).",
+        parameters: {
+            type: "object",
+            properties: {
+                keys: {
+                    type: "array",
+                    items: { type: "string", enum: ["forward", "back", "left", "right", "jump", "sprint", "sneak"] },
+                    description: "the keys held together",
+                },
+                ticks: { type: "integer", description: "how long, 1 to 40 ticks (2 s)", default: 10 },
+            },
+            required: ["keys"],
+        },
+        reasons: { invalid_args: "no keys, an unknown key, or ticks not between 1 and 40" },
+    },
     collect_block: {
         kind: "shortcut",
         description:
@@ -326,15 +417,15 @@ const CATALOGUE = {
         parameters: {
             type: "object",
             properties: {
-                block: string("block name, e.g. 'oak_log'"),
+                block: string("block name, e.g. 'oak_log', or a game group of blocks: '#logs' = any log"),
                 count: { type: "integer", description: "number of blocks", default: 1 },
             },
             required: ["block"],
         },
         reasons: {
-            unknown_block: "this name is not a block",
+            unknown_block: "this name is neither a block nor a game group of blocks",
             invalid_args: "count is not an integer >= 1",
-            block_not_found: "no block of this type within 32 blocks: try explore",
+            block_not_found: "no block of this type within 64 blocks: try explore",
             partial: "fewer blocks than requested (details.dug)",
             no_path: "blocks exist but none is reachable",
             no_tool: "this block requires a tool (details.tools)",

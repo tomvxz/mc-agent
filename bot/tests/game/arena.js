@@ -160,6 +160,15 @@ async function resetArena(bot) {
     await sleep(300);
 }
 
+// The arena's underside is barrier one block below the floor: a drop needs a tower. The bot stands on
+// a 3x3 stone tower 5 blocks high; walking east falls off its edge.
+async function onTower(bot) {
+    await placeAndWait(bot, `/fill ${CENTER.x - 1} ${CENTER.y} ${CENTER.z - 1} ${CENTER.x + 1} ${CENTER.y + 4} ${CENTER.z + 1} stone`, [CENTER.x, CENTER.y + 4, CENTER.z], "stone");
+    await runCommand(bot, `/tp ${bot.username} ${CENTER.x + 0.5} ${CENTER.y + 5} ${CENTER.z + 0.5}`);
+    if (!(await waitUntil(() => bot.entity.position.y >= CENTER.y + 5 && bot.entity.onGround, 3000)))
+        throw new Error("the bot is not on the tower"); // setup failed
+}
+
 export {
     buildOak,
     CENTER,
@@ -168,6 +177,7 @@ export {
     growOak,
     MAX,
     MIN,
+    onTower,
     placeAndWait,
     prepareArena,
     resetArena,

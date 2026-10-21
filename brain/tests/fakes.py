@@ -42,9 +42,14 @@ STATE = {
     "thunder": False,
     "inventory": {},
     "held_item": None,
-    "block_below": "grass_block",
-    "entities": [{"id": 3, "name": "cow", "type": "animal", "hostile": False, "offset": [0, 0, -9], "distance": 9}],
-    "notable_blocks": {"oak_log": {"nearest": [3.5, 0, 1.5], "distance": 3.8, "r8": 2, "r16": 5, "r32": 9}},
+    # A 3x3x3 grid (radius 1): grass under the feet, air above (order: dy, then dz, then dx)
+    "blocks": {"origin": [100, 64, -21], "radius": 1, "palette": ["air", "grass_block[snowy=false]"], "cells": [1] * 9 + [0] * 18},
+    "perception": "sight",
+    "in_sight": {"oak_log": {"count": 2, "nearest": [3.5, 0, 1.5], "distance": 3.8}},
+    "entities": [
+        {"id": 3, "name": "cow", "type": "animal", "hostile": False, "offset": [0, 0, -9], "distance": 9, "visible": True},
+        {"id": 4, "name": "zombie", "type": "hostile", "hostile": True, "offset": [0, -5, 2], "distance": 5.4, "visible": False},
+    ],
 }
 
 
@@ -74,7 +79,11 @@ class FakeBody:
             req = json.loads(request.content)
             self.setups.append(req)
             self.state = {**self.state, "inventory": dict(req["inventory"])}
-            return httpx.Response(200, json=ok(position=[req["x"] + 0.5, 64, req["z"] + 0.5]))
+            counted = {name: 4 for name in req.get("count_blocks", [])}  # some of each around
+            return httpx.Response(
+                200,
+                json=ok(position=[req["x"] + 0.5, 64, req["z"] + 0.5], **({"blocks_within_32": counted} if counted else {})),
+            )
         return httpx.Response(404, json={"error": "not_found"})
 
     def client(self) -> Body:

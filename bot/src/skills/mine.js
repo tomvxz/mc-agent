@@ -2,7 +2,9 @@
 // It is only an assembly of primitives (see CLAUDE.md, skill philosophy).
 import collect_block from "./collect_block.js";
 import find from "./find.js";
-import { gainedSince, inventoryCounts } from "./utils.js";
+import { step } from "../steps.js";
+import { findBlockTag } from "../tags.js";
+import { gainedSince, inventoryCounts, walkSeconds } from "./utils.js";
 
 // Failures that only concern THIS block: try the next one (not_collected: its item fell out of reach)
 const TRY_ANOTHER = [
@@ -14,11 +16,18 @@ const TRY_ANOTHER = [
     "not_collected",
 ];
 const MAX_ATTEMPTS = 20;
+// Same reach as find's default: otherwise mine says block_not_found where find sees a log (seen at 42 blocks)
+const SEARCH_RADIUS = 64;
+// Measured on the journal (2026-10-21, logs): about 5 s per block (find, walk, dig, pick up). With the
+// budget rule (stopped at 3x + 10 s, at most 300 s), this allows up to ~18 blocks per call: beyond, the
+// call is refused (too_long) and the brain repeats mine (a tactic will do it without the LLM).
+const SECONDS_PER_BLOCK = 5;
 
 async function mine(bot, { block, count = 1 } = {}) {
-    // 1. Check the arguments
-    if (!bot.registry.blocksByName[block])
-        return { success: false, reason: "unknown_block", details: {} };
+    // 1. Check the arguments: a block name, or a game group of blocks ('#logs' = any log, see find)
+    const group = typeof block === "string" && block.startsWith("#") && findBlockTag(bot, block.slice(1));
+    if (!bot.registry.blocksByName[block] && !group)
+        return { success: false, reason: "unknown_block", details: { block } };
     if (!Number.isInteger(count) || count < 1)
         return { success: false, reason: "invalid_args", details: { count } };
 
@@ -32,10 +41,10 @@ async function mine(bot, { block, count = 1 } = {}) {
 
     while (dug < count) {
         // 2. The nearest block not tried yet
-        const found = await find(bot, {
+        const found = await step(bot, "find", find, {
             target: block,
             count: 50,
-            max_distance: 32,
+            max_distance: SEARCH_RADIUS,
         });
         const target =
             found.success &&
@@ -62,7 +71,7 @@ async function mine(bot, { block, count = 1 } = {}) {
         tried.add(`${target.x},${target.y},${target.z}`);
 
         // 3. Break it and pick up what drops (collect_block walks there on its own)
-        const r = await collect_block(bot, {
+        const r = await step(bot, "collect_block", collect_block, {
             x: target.x,
             y: target.y,
             z: target.z,
@@ -99,5 +108,16 @@ async function mine(bot, { block, count = 1 } = {}) {
         details: { dug, collected: gainedSince(bot, before), unreachable, ...(cleared && { cleared }) },
     };
 }
+
+// Estimated duration, for its time budget (runSkill.js): walking to the nearest block of the type (an
+// estimate: any block the client knows) + SECONDS_PER_BLOCK per block. Without the walk, a log found
+// 58 blocks away was stopped on the way (budget 40 s, seen 2026-10-21).
+function walkToNearest(bot, block) {
+    const group = typeof block === "string" && block.startsWith("#") && findBlockTag(bot, block.slice(1));
+    const ids = group ? [...group] : [bot.registry.blocksByName[block].id];
+    const nearest = bot.findBlock({ matching: ids, maxDistance: SEARCH_RADIUS });
+    return nearest ? walkSeconds(bot, nearest.position.x, nearest.position.y, nearest.position.z) : 0;
+}
+mine.budget = (bot, { block, count = 1 }) => walkToNearest(bot, block) + SECONDS_PER_BLOCK * count + 5;
 
 export default mine;

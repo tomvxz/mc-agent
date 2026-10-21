@@ -17,7 +17,7 @@ const MAX_ENTITIES = 20;
 const ENTITY_EVERY = 5; // physics ticks between two entity samples
 const CAPS = {
     events: 500,
-    body: 2400,
+    body: 6000, // 300 s at 20 ticks per second: the hard cap of runSkill.js
     actions: 1000,
     blocks: 2000,
     entities: 6000,

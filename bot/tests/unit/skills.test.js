@@ -22,20 +22,24 @@ async function expectResult(promise, success, reason) {
   return r;
 }
 
-test("the skills of batch 1 (+ pick_up and collect_block, split out of break_block, + recipe)", () => {
+test("the skills of batch 1 (+ pick_up and collect_block, split out of break_block, + recipe, + low level)", () => {
   assert.deepStrictEqual(Object.keys(skills).sort(), [
     "break_block",
     "collect_block",
     "craft",
+    "craftable",
     "eat",
     "explore",
     "find",
+    "look",
     "mine",
     "move_to",
     "pick_up",
     "place_block",
+    "press",
     "recipe",
     "scan",
+    "walk",
   ]);
 });
 
@@ -173,6 +177,26 @@ test("place_block: arguments, inventory, occupied cell, no support", async () =>
     false,
     "occupied",
   );
+  // A flower is not replaceable in the game: occupied
+  const flower = fakeBot({
+    inventory: { cobblestone: 5 },
+    blocks: { "1,100,0": "poppy" },
+  });
+  await expectResult(
+    skills.place_block(flower, { item: "cobblestone", x: 1, y: 100, z: 0 }),
+    false,
+    "occupied",
+  );
+  // Grass is replaced by the game: not occupied (here, no support: the next check)
+  const grass = fakeBot({
+    inventory: { cobblestone: 5 },
+    blocks: { "1,100,0": "short_grass" },
+  });
+  await expectResult(
+    skills.place_block(grass, { item: "cobblestone", x: 1, y: 100, z: 0 }),
+    false,
+    "no_support",
+  );
   const midAir = fakeBot({ inventory: { cobblestone: 5 } }); // only air around
   await expectResult(
     skills.place_block(midAir, { item: "cobblestone", x: 1, y: 100, z: 0 }),
@@ -230,24 +254,23 @@ test("craft: a failure says what the recipe needs (like the recipe book), varian
     Recipe.find(id).filter((r) => !r.requiresTable || table);
   let r = await skills.craft(bot, { item: "wooden_pickaxe" });
   assert.strictEqual(r.details.needs_table, true);
-  assert.deepStrictEqual(
-    [r.details.ingredients.stick.required, r.details.ingredients.stick.owned],
-    [2, 0],
-  );
-  assert.strictEqual(r.details.ingredients.any_planks.required, 3); // any planks, not "cherry_planks"
-  assert.ok(r.details.ingredients.any_planks.one_of.includes("oak_planks"));
+  // A list; the planks variants are ONE entry without a name (no "any_planks" pseudo-item)
+  assert.deepStrictEqual(r.details.ingredients[0], { item: "stick", required: 2, owned: 0 });
+  const planks = r.details.ingredients[1];
+  assert.deepStrictEqual([planks.item, planks.required, planks.owned], [undefined, 3, 0]);
+  assert.ok(planks.one_of.includes("oak_planks"));
 
   // With oak planks in the inventory, the oak recipe is the closest: named precisely
   const withOak = fakeBot({ inventory: { oak_planks: 3 } });
   withOak.recipesAll = bot.recipesAll;
   r = await skills.craft(withOak, { item: "wooden_pickaxe" });
-  assert.deepStrictEqual(Object.keys(r.details.ingredients).sort(), ["oak_planks", "stick"]);
   assert.deepStrictEqual(
-    [r.details.ingredients.oak_planks.required, r.details.ingredients.oak_planks.owned],
-    [3, 3],
+    [...r.details.ingredients].sort((a, b) => a.item.localeCompare(b.item)),
+    [
+      { item: "oak_planks", required: 3, owned: 3 },
+      { item: "stick", required: 2, owned: 0 }, // strictly one level: nothing about how to get it
+    ],
   );
-  // Strictly one level: nothing about how to get the ingredients
-  assert.strictEqual(r.details.ingredients.stick.how, undefined);
 
   // Recipes without the usual fields: the reason stays right, the extra details are just left out
   const odd = fakeBot();
@@ -364,7 +387,7 @@ test("scan: arguments and shape of the result", async () => {
       "1,99,0": "dirt",
     },
     entities: {
-      1: { type: "hostile", name: "zombie", position: new Point(5, 100, 0) },
+      1: { type: "hostile", name: "zombie", position: new Point(5, 100, 4) }, // not behind the logs
     },
   });
   const r = await expectResult(skills.scan(bot), true, "ok");
@@ -373,7 +396,7 @@ test("scan: arguments and shape of the result", async () => {
     nearest: [3, 100, 0],
   });
   assert.strictEqual(r.details.blocks.iron_ore.count, 1);
-  assert.strictEqual(r.details.blocks.dirt, undefined); // dirt is not a "useful" block
+  assert.strictEqual(r.details.blocks.dirt.count, 1); // every kind of block in sight: no list
   assert.strictEqual(r.details.entities.zombie.count, 1);
 });
 
@@ -469,6 +492,65 @@ test("break_block: a block hidden by stone -> only viewpoints, the stone is neve
 test("mine: stone without a pickaxe -> no_tool (bubbles up from break_block)", async () => {
   const bot = fakeBot({ blocks: { "3,100,0": "stone" } });
   await expectResult(skills.mine(bot, { block: "stone" }), false, "no_tool");
+});
+
+// A stone at 2,100,0 in plain view; dig() removes it
+function visibleStone() {
+  const blocks = { "2,100,0": "stone" };
+  const bot = fakeBot({ blocks });
+  bot.world = { raycast: () => bot.blockAt(new Point(2, 100, 0)) };
+  const calls = [];
+  bot.dig = async (b) => {
+    calls.push(`dig ${b.name}`);
+    delete blocks[`${b.position.x},${b.position.y},${b.position.z}`];
+  };
+  return { bot, calls };
+}
+
+test("break_block: require_tool false breaks without the tool and says no_drop; a bad value is refused", async () => {
+  const { bot, calls } = visibleStone();
+  await expectResult(
+    skills.break_block(bot, { x: 2, y: 100, z: 0, require_tool: "no" }),
+    false,
+    "invalid_args",
+  );
+  await expectResult(skills.break_block(bot, { x: 2, y: 100, z: 0 }), false, "no_tool");
+  const r = await expectResult(
+    skills.break_block(bot, { x: 2, y: 100, z: 0, require_tool: false }),
+    true,
+    "ok",
+  );
+  assert.strictEqual(r.details.no_drop, true);
+  assert.deepStrictEqual(calls, ["dig stone"]);
+});
+
+test("budgets: break_block counts the game's digging time, mine the number of blocks", () => {
+  const { bot } = visibleStone();
+  const stone = bot.blockAt(new Point(2, 100, 0));
+  bot.blockAt = () => ({ ...stone, digTime: () => 7500 }); // stone by hand: 7.5 s in the game
+  const seconds = skills.break_block.budget(bot, { x: 2, y: 100, z: 0 });
+  assert.ok(seconds > 7.5 && seconds < 12, `${seconds}`);
+  assert.ok(skills.mine.budget(bot, { block: "stone", count: 10 }) > skills.mine.budget(bot, { block: "stone", count: 2 }));
+  // The walk to the nearest block counts: a log 58 blocks away takes longer than one next to the bot
+  const far = fakeBot();
+  far.findBlock = () => ({ position: new Point(58, 100, 0) });
+  const near = fakeBot();
+  near.findBlock = () => ({ position: new Point(2, 100, 0) });
+  assert.ok(skills.mine.budget(far, { block: "oak_log" }) - skills.mine.budget(near, { block: "oak_log" }) > 15);
+});
+
+test("find and mine: a game group of blocks ('#logs'), an unknown group", async () => {
+  const bot = fakeBot({
+    blocks: { "10,100,0": "birch_log", "3,100,0": "oak_log", "5,100,0": "stone" },
+  });
+  const r = await expectResult(skills.find(bot, { target: "#logs" }), true, "ok");
+  assert.deepStrictEqual(
+    r.details.matches.map((m) => [m.block, m.x]),
+    [["oak_log", 3], ["birch_log", 10]],
+  );
+  await expectResult(skills.find(bot, { target: "#no_such_group" }), false, "unknown_target");
+  await expectResult(skills.mine(fakeBot(), { block: "#no_such_group" }), false, "unknown_block");
+  await expectResult(skills.mine(fakeBot(), { block: "#logs" }), false, "block_not_found");
 });
 
 // An item lying on the ground; walking onto it (pathfinder.goto) picks it up into the inventory
@@ -613,24 +695,108 @@ test("landingSpot: a falling drop is aimed at where it will lie (on leaves too)"
   assert.deepStrictEqual(xyz(landingSpot(bot, new Point(20.5, 100, 20.5))), [20.5, 100, 20.5]);
 });
 
-test("recipe: one level only, the LLM asks again for an ingredient", async () => {
+test("recipe: one level only, both ways; variants named with the game's group", async () => {
   const { Recipe } = prismarineRecipe(MC_VERSION);
   const bot = fakeBot();
   bot.recipesAll = (id, meta, table) => Recipe.find(id).filter((r) => !r.requiresTable || table);
   const r = await expectResult(skills.recipe(bot, { item: "crafting_table" }), true, "ok");
   assert.deepStrictEqual([r.details.needs_table, r.details.makes], [false, 1]);
-  assert.deepStrictEqual(Object.keys(r.details.ingredients), ["any_planks"]);
-  const planks = r.details.ingredients.any_planks;
-  assert.deepStrictEqual([planks.required, planks.owned], [4, 0]);
+  assert.strictEqual(r.details.ingredients.length, 1);
+  const [planks] = r.details.ingredients;
+  assert.deepStrictEqual(Object.keys(planks), ["group", "one_of", "required", "owned"]); // nothing about logs
+  assert.deepStrictEqual([planks.group, planks.required, planks.owned], ["#planks", 4, 0]);
   assert.ok(planks.one_of.includes("birch_planks") && planks.one_of.includes("oak_planks"));
-  assert.strictEqual(planks.how, undefined); // nothing about logs here
-  // The next level, when asked
+  // The next level, when asked: one item, or the whole group
   const next = await expectResult(skills.recipe(bot, { item: "birch_planks" }), true, "ok");
-  assert.deepStrictEqual(next.details.ingredients, { birch_log: { required: 1, owned: 0 } });
+  assert.deepStrictEqual(next.details.ingredients, [{ item: "birch_log", required: 1, owned: 0 }]);
   assert.strictEqual(next.details.makes, 4);
+  const group = await expectResult(skills.recipe(bot, { item: "#planks" }), true, "ok");
+  const birch = group.details.recipes.find((x) => x.item === "birch_planks");
+  assert.deepStrictEqual(birch.ingredients, [{ item: "birch_log", required: 1, owned: 0 }]);
+  // The other way: what is crafted directly from it (one level: planks, not the table)
+  const uses = await expectResult(skills.recipe(bot, { uses: "birch_log" }), true, "ok");
+  const made = uses.details.used_in.map((u) => u.item);
+  assert.ok(made.includes("birch_planks") && !made.includes("crafting_table"), JSON.stringify(made));
+  const fromLogs = await expectResult(skills.recipe(bot, { uses: "#logs" }), true, "ok");
+  assert.ok(fromLogs.details.used_in.some((u) => u.item === "spruce_planks"));
   // A log is gathered, not crafted
   await expectResult(skills.recipe(bot, { item: "birch_log" }), false, "no_recipe");
   // The failures decided before anything else
   await expectResult(skills.recipe(bot, {}), false, "invalid_args");
+  await expectResult(skills.recipe(bot, { item: "oak_log", uses: "oak_log" }), false, "invalid_args");
   await expectResult(skills.recipe(bot, { item: "no_such_item" }), false, "unknown_item");
+  await expectResult(skills.recipe(bot, { item: "#no_such_group" }), false, "unknown_item");
+  await expectResult(skills.recipe(bot, { item: "any_planks" }), false, "unknown_item"); // not an item
+});
+
+test("craftable: what the inventory allows now (like the recipe book's filter), and with a table", async () => {
+  const bot = fakeBot({ inventory: { birch_log: 2 } });
+  const birch = bot.registry.itemsByName.birch_planks.id;
+  const pickaxe = bot.registry.itemsByName.wooden_pickaxe.id;
+  bot.recipesFor = (id, meta, n, table) =>
+    id === birch ? [{ result: { count: 4 } }] : id === pickaxe && table ? [{ result: { count: 1 } }] : [];
+  const r = await expectResult(skills.craftable(bot), true, "ok");
+  assert.deepStrictEqual(r.details.now, [{ item: "birch_planks", makes: 4 }]);
+  assert.deepStrictEqual(r.details.with_table, [{ item: "wooden_pickaxe", makes: 1 }]);
+  assert.strictEqual(r.details.table_near, false);
+  await expectResult(skills.craftable(fakeBot()), false, "nothing_craftable");
+});
+
+// A floor of stone at y=99 from x=-2 to 12 (z=0), the bot at (0.5, 100, 0.5)
+const floor = (extra = {}) => {
+  const blocks = { ...extra };
+  for (let x = -2; x <= 12; x++) blocks[`${x},99,0`] ??= "stone";
+  return blocks;
+};
+
+test("walk: arguments; a wall, a drop and water ahead are refused before moving", async () => {
+  await expectResult(skills.walk(fakeBot(), { yaw: "east" }), false, "invalid_args");
+  await expectResult(skills.walk(fakeBot(), { yaw: -Math.PI / 2, distance: 20 }), false, "invalid_args");
+  const wall = await expectResult(
+    skills.walk(fakeBot({ blocks: floor({ "1,100,0": "stone", "1,101,0": "stone" }) }), { yaw: -Math.PI / 2 }),
+    false,
+    "blocked",
+  );
+  assert.strictEqual(wall.details.obstacle.block, "stone");
+  const drop = await expectResult(skills.walk(fakeBot(), { yaw: -Math.PI / 2 }), false, "danger_ahead");
+  assert.strictEqual(drop.details.danger, "drop");
+  const water = await expectResult(
+    skills.walk(fakeBot({ blocks: floor({ "1,99,0": "water" }) }), { yaw: -Math.PI / 2 }),
+    false,
+    "danger_ahead",
+  );
+  assert.strictEqual(water.details.danger, "water");
+});
+
+test("walk: faces the direction and holds forward, jumps a one-block step, releases the keys", async () => {
+  const bot = fakeBot({ blocks: floor({ "1,100,0": "stone" }) }); // a step, room above it
+  const held = [];
+  bot.setControlState = (key, value) => {
+    if (value) held.push(key);
+    if (value && key === "forward") bot.entity.position.x += 0.5; // the fake walks half a block per step
+    bot.controlState[key] = value;
+  };
+  await expectResult(skills.walk(bot, { yaw: -Math.PI / 2, distance: 1 }), true, "ok");
+  assert.strictEqual(bot.entity.yaw, -Math.PI / 2); // it faces where it walks (east)
+  assert.ok(held.includes("jump"));
+  assert.deepStrictEqual([bot.controlState.forward, bot.controlState.jump], [false, false]);
+});
+
+test("look and press: arguments; press holds the keys then releases them, without any check (raw)", async () => {
+  await expectResult(skills.look(fakeBot(), { yaw: "north" }), false, "invalid_args");
+  await expectResult(skills.look(fakeBot(), { yaw: 0, pitch: 3 }), false, "invalid_args");
+  await expectResult(skills.press(fakeBot(), { keys: [] }), false, "invalid_args");
+  await expectResult(skills.press(fakeBot(), { keys: ["fly"] }), false, "invalid_args");
+  await expectResult(skills.press(fakeBot(), { keys: ["jump"], ticks: 100 }), false, "invalid_args");
+
+  const bot = fakeBot(); // only air around: walk would refuse (drop), press does not check
+  await expectResult(skills.look(bot, { yaw: -Math.PI / 2 }), true, "ok");
+  const held = [];
+  bot.setControlState = (key, value) => {
+    if (value) held.push(key);
+    bot.controlState[key] = value;
+  };
+  await expectResult(skills.press(bot, { keys: ["forward", "sprint"], ticks: 2 }), true, "ok");
+  assert.deepStrictEqual(held, ["forward", "sprint"]);
+  assert.deepStrictEqual([bot.controlState.forward, bot.controlState.sprint], [false, false]);
 });
