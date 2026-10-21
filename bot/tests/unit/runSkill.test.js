@@ -149,6 +149,16 @@ test("a skill that makes no progress is stopped (no_progress); moving counts as 
     return { success: true, reason: "ok", details: {} };
   };
   assert.strictEqual((await runSkill(bot, walking, {}, { noProgressS: 0.3 })).reason, "ok");
+  // Not moving but the inventory changing (crafting, picking up) is progress too
+  const crafter = fakeBot({ inventory: { oak_log: 8 } });
+  const crafting = async (b) => {
+    for (let i = 0; i < 8; i++) {
+      await sleep(100);
+      b.inventory.items()[0].count -= 1;
+    }
+    return { success: true, reason: "ok", details: {} };
+  };
+  assert.strictEqual((await runSkill(crafter, crafting, {}, { noProgressS: 0.3 })).reason, "ok");
 });
 
 test("an alert stops the skill: hurt, or a NEW monster close (not one already there)", async () => {
@@ -159,14 +169,22 @@ test("an alert stops the skill: hurt, or a NEW monster close (not one already th
   }, {});
   assert.deepStrictEqual([r.reason, r.details.trigger, r.details.health], ["alert", "damage", 17]);
 
-  const zombie = (id, x) => ({ id, type: "hostile", name: "zombie", position: hurt.entity.position.offset(x, 0, 0) });
-  const bot = fakeBot({ entities: { 1: zombie(1, 3) } }); // already close at the start: ignored
+  const monster = (id, name, x) => ({ id, type: "hostile", name, position: hurt.entity.position.offset(x, 0, 0) });
+  // A monster already close at the start does not stop the skill (it may be the answer to it)
+  const calm = fakeBot({ entities: { 1: monster(1, "zombie", 3) } });
+  const r1 = await runSkill(calm, async () => {
+    await sleep(600); // more than two checks of the watcher
+    return { success: true, reason: "ok", details: {} };
+  }, {});
+  assert.strictEqual(r1.reason, "ok");
+  // A NEW one coming close does (a husk, so that the alert says which one it was)
+  const bot = fakeBot({ entities: { 1: monster(1, "zombie", 3) } });
   const r2 = await runSkill(bot, async () => {
     await sleep(400);
-    bot.entities[2] = zombie(2, 4); // a new one comes close
+    bot.entities[2] = monster(2, "husk", 4);
     await new Promise(() => {});
   }, {});
-  assert.deepStrictEqual([r2.reason, r2.details.trigger, r2.details.entity], ["alert", "hostile_near", "zombie"]);
+  assert.deepStrictEqual([r2.reason, r2.details.trigger, r2.details.entity], ["alert", "hostile_near", "husk"]);
 });
 
 test("outside a skill, sleep and waitUntil are plain waits", async () => {

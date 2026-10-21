@@ -59,6 +59,7 @@ class FakeBody:
     def __init__(self, execute: Callable[[str, dict[str, Any]], dict[str, Any]], data_dir: str = "/tmp"):
         self.executed: list[dict[str, Any]] = []
         self.setups: list[dict[str, Any]] = []  # the POST /setup requests
+        self.counted = 4  # how many of each watched block the setup reports within 32 blocks
         self.execute = execute
         self.data_dir = data_dir
         self.state = dict(STATE)
@@ -79,7 +80,7 @@ class FakeBody:
             req = json.loads(request.content)
             self.setups.append(req)
             self.state = {**self.state, "inventory": dict(req["inventory"])}
-            counted = {name: 4 for name in req.get("count_blocks", [])}  # some of each around
+            counted = {name: self.counted for name in req.get("count_blocks", [])}
             return httpx.Response(
                 200,
                 json=ok(position=[req["x"] + 0.5, 64, req["z"] + 0.5], **({"blocks_within_32": counted} if counted else {})),

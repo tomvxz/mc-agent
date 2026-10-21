@@ -62,11 +62,28 @@ test("perception: find only sees what is in line of sight; with \"all\", everyth
     assert.throws(() => setPerception("xray"), /unknown perception/);
 });
 
+// Is the grid cell at (x, y, z) marked visible (decodes the mask as docs/journal.md says)
+function cellVisible(grid, x, y, z) {
+    const R = grid.radius;
+    const S = 2 * R + 1;
+    const [ox, oy, oz] = grid.origin;
+    const i = (y - oy + R) * S * S + (z - oz + R) * S + (x - ox + R);
+    return (Buffer.from(grid.visible, "base64")[i >> 3] & (1 << (i & 7))) !== 0;
+}
+
 test("state: in_sight lists every kind of block seen, the grid marks the hidden cells", async () => {
     const { setPerception } = await import("../../src/perception.js");
     const s = observe(wallScene());
     assert.equal(s.in_sight.spruce_log.nearest[0], 8.5); // the trunk at x=9, not the hidden log at x=5
     assert.ok(s.in_sight.stone.count >= 1); // the wall itself is seen: no list of kinds
+    // The grid holds the hidden log (everything known) but marks it not visible; the wall's face and
+    // the air between are visible, and so is the top of the trunk
+    const g = s.blocks;
+    assert.equal(g.palette[g.cells[(100 - g.origin[1] + 8) * 289 + (0 - g.origin[2] + 8) * 17 + (5 - g.origin[0] + 8)]], "spruce_log");
+    assert.deepEqual(
+        [cellVisible(g, 5, 100, 0), cellVisible(g, 3, 101, 0), cellVisible(g, 2, 101, 0), cellVisible(g, 9, 104, 0)],
+        [false, true, true, true],
+    );
     setPerception("all");
     try {
         assert.equal(observe(wallScene()).in_sight.spruce_log.nearest[0], 4.5); // x-ray: the hidden log

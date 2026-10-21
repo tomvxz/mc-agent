@@ -522,6 +522,14 @@ test("break_block: require_tool false breaks without the tool and says no_drop; 
   );
   assert.strictEqual(r.details.no_drop, true);
   assert.deepStrictEqual(calls, ["dig stone"]);
+  // collect_block promises the item: it always needs the tool, whatever it is given
+  const again = visibleStone();
+  await expectResult(
+    skills.collect_block(again.bot, { x: 2, y: 100, z: 0, require_tool: false }),
+    false,
+    "no_tool",
+  );
+  assert.deepStrictEqual(again.calls, []);
 });
 
 test("budgets: break_block counts the game's digging time, mine the number of blocks", () => {

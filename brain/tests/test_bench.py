@@ -142,3 +142,16 @@ def test_a_place_already_played_is_not_fresh(tmp_path):
         x + bench.USED_RADIUS, z, used
     )
     assert bench.used_places(tmp_path / "missing.jsonl") == []
+
+
+def test_no_watched_block_around_and_xray_are_told_to_the_body(tmp_path):
+    body = FakeBody(lambda name, args: ok(), data_dir=str(tmp_path))
+    body.counted = 0  # no tree within 32 blocks
+    llm = FakeLLM([plan(("define_goal", {"item": "oak_log", "count": 3})), plan(done=True)])
+    r = bench.run_place(
+        bench.TASKS["oak_logs"], body.client(), llm, place=1, x=0, z=0, seed=1, max_turns=1, sight=False
+    )
+    assert r["watched_near"] is False
+    assert body.setups[0]["perception"] == "all"
+    assert "watched block within 32: no" in bench.format_record(r)
+
