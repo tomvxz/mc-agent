@@ -71,10 +71,10 @@ Written once per run, right after the bot spawns: the run's fixed facts, not rep
 
 ## `transitions.jsonl`
 
-### Version 8 (current)
+### Version 9 (current)
 ```jsonc
 {
-  "schema_version": 8,
+  "schema_version": 9,
   // --- Identity (everything else about the run is in runs.jsonl)
   "run_id": "run-…",                    // null when no run was started (unit tests)
   "seq": 17,                            // 0, 1, 2... within the run, given when the skill STARTS
@@ -111,7 +111,8 @@ so the world model also learns from short actions when the brain asked for `mine
 `parent_seq` (the seq of the skill that called it, which may itself be a step), the same `source`,
 `episode_id` and `turn`, its own `state`, `next_state`, result and times, and `trace: null`: its trace is
 the part of the top line's trace between its `tick_start` and `tick_end`. No 300 ms wait after a step.
-A step whose top skill was stopped ends with reason `stopped` (its next action was refused).
+A step whose top skill was stopped ends with reason `stopped` (its next action was refused). Its
+`duration` is the step itself (not the observations), `wall_end` and `tick_end` when it ended.
 Lines are written when a skill ENDS: a step's line comes before its parent's, and seq order = start order.
 The brain's tools (`brain/show.py`, `brain/bench.py`) read only the top lines (no `parent_seq`).
 
@@ -248,6 +249,9 @@ since the start of the skill.
 (`timed_out` is the one exception kept on purpose: it equals `reason == "timeout"` but makes filters readable.)
 
 ### Earlier versions (October 2026, development data only)
+v8 (2026-10-21): a step's `duration` also counted its two observations, its `wall_end`/`tick_end` came
+after observing `state`; and the v8 lines come in three shapes: the first ones have neither `in_sight`
+nor `notable_blocks` and a radius-5 grid, then `in_sight` with radius 5, then radius 8.
 v7: the state had `notable_blocks` (logs, ores... within 32 blocks, seen through walls), `block_below`, `block_front`, block names without their state in the grid, no
 visibility, no `looking_at`, fewer body and entity fields, a hand-made hostile list; `biome` always null.
 v6: v7 without step lines and `parent_seq`; `seq` was given when the line was written (at the end).

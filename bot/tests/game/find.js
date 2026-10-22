@@ -34,7 +34,7 @@ const nominal = [
         name: 'a husk found with "hostile"',
         setup: async (bot) => {
             await runCommand(bot, `/summon husk ${C.x + 6.5} ${C.y} ${C.z + 0.5} {NoAI:1b}`);
-            if (!(await waitUntil(() => Object.values(bot.entities).some(isHostile), 3000)))
+            if (!(await waitUntil(() => Object.values(bot.entities).some((e) => isHostile(bot, e)), 3000)))
                 throw new Error("husk invisible");
         },
         args: { target: "hostile" },

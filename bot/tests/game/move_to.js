@@ -140,14 +140,14 @@ nominal.push(
         name: "instinct: keep away from a husk on the straight line",
         setup: async (bot) => {
             await runCommand(bot, `/summon husk ${C.x + 0.5} ${C.y} ${C.z + 5.5} {NoAI:1b}`);
-            if (!(await waitUntil(() => Object.values(bot.entities).some(isHostile), 3000))) {
+            if (!(await waitUntil(() => Object.values(bot.entities).some((e) => isHostile(bot, e)), 3000))) {
                 throw new Error("monster invisible to the bot");
             }
             // Record the minimum distance to the husk during the whole trip
             if (tracking) clearInterval(tracking.timer);
             tracking = { min: Infinity };
             tracking.timer = setInterval(() => {
-                const h = Object.values(bot.entities).find(isHostile);
+                const h = Object.values(bot.entities).find((e) => isHostile(bot, e));
                 if (h)
                     tracking.min = Math.min(
                         tracking.min,

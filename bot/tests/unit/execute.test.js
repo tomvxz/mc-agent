@@ -46,13 +46,13 @@ test("if observe throws (bot disconnected), the transition is still written with
   assert.strictEqual(d.reason, "unknown_block");
 });
 
-test("v8 line: minimal identity, times, args_resolved, result", async () => {
+test("v9 line: minimal identity, times, args_resolved, result", async () => {
   await execute(fakeBot(), "find", { target: "oak_log" }, "unit", {
     episode_id: "ep-1",
     turn: 0,
   });
   const d = last();
-  assert.strictEqual(d.schema_version, 8);
+  assert.strictEqual(d.schema_version, 9);
   assert.deepStrictEqual([d.source, d.episode_id, d.turn], ["unit", "ep-1", 0]);
   assert.strictEqual(typeof d.seq, "number");
   // Run-level facts are not repeated on every line (they are in runs.jsonl)
@@ -247,4 +247,7 @@ test("the steps inside a shortcut get their own lines, linked by parent_seq, wit
   );
   assert.ok(stepLine.seq > top.seq); // seq is given at the start
   assert.deepStrictEqual([stepLine.episode_id, stepLine.turn, stepLine.source], ["ep-2", 3, "unit"]);
+  // Its duration is the step itself, inside its wall time (v8 counted the observations too)
+  const span = (Date.parse(stepLine.wall_end) - Date.parse(stepLine.wall_start)) / 1000;
+  assert.ok(stepLine.duration <= span + 0.001, `${stepLine.duration} > ${span}`);
 });

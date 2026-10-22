@@ -309,6 +309,10 @@ pas des engagements ; en ajouter, en retirer selon ce que montrent les données.
   du jeu (`#logs`) ; fin du temps limite unique de 60 s (voir Conventions : budget, progrès, alertes) ; `mine`
   plafonné par son budget (marche jusqu'au plus proche + ~5 s par bloc : ~18 blocs par appel). À décider : `explore` (max 256 -> 64 ?).
   Arène après ces changements (21/10/2026) : toutes les suites passent (règles d'arrêt, tags, place_block).
+  Puis après perception, journal v9, walk/press (21/10/2026) : toutes les suites passent sauf `eat` (monde
+  paisible) ; walk confirme la convention des angles (0 = nord, π/2 = ouest, −π/2 = est), press le rapport
+  marche/sprint du jeu. Relecture du journal v8 : liens parent/étapes cohérents, aucune exception ; corrigé
+  la durée des étapes (comptait les observations) -> v9.
 - `observe` revu (journal v8) : il garde TOUT ce que le client sait (le serveur envoie les blocs derrière les
   murs) et MARQUE ce que le bot voit (ligne de vue dans toutes les directions : masque de la grille, `visible`
   des entités). La perception = un masque sur la même ligne, pas un second format. Ajoutés : état des blocs,

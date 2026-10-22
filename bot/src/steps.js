@@ -16,7 +16,9 @@ import { observe } from "./state.js";
 // v1-v5: development formats. v6: simplified. v7: the steps inside a skill have their own lines
 // (parent_seq), and seq is given when a skill STARTS (a parent's seq is smaller than its steps').
 // v8: the state (observe) has block states, visibility, what the bot looks at, more body and entities.
-const SCHEMA_VERSION = 8;
+// v9: a step's duration is the step itself (v8 counted its two observations too), wall_end and tick_end
+// are when it ended; and every v9 state has in_sight and the radius-8 grid (early v8 lines did not).
+const SCHEMA_VERSION = 9;
 
 // Per bot: the next sequence number (0, 1, 2... per run)
 const sequences = new WeakMap();
@@ -62,6 +64,7 @@ async function step(bot, name, fn, args = {}) {
     const startMs = Date.now();
     const tickStart = safe(() => bot.time.age);
     const before = safe(() => observe(bot));
+    const runStart = Date.now(); // duration = the step itself, like runSkill's for a top skill (not the observations)
     let result;
     let error = null;
     try {
@@ -71,6 +74,8 @@ async function step(bot, name, fn, args = {}) {
         error = { type: e.name, message: e.message, stack: String(e.stack || "").slice(0, 2000) };
         throw e; // the top skill reports it (exception, or stopped)
     } finally {
+        const endMs = Date.now();
+        const tickEnd = safe(() => bot.time.age);
         writeLine({
             seq,
             parent_seq: parent.seq,
@@ -78,9 +83,9 @@ async function step(bot, name, fn, args = {}) {
             ...(parent.meta.episode_id !== undefined && { episode_id: parent.meta.episode_id }),
             ...(parent.meta.turn !== undefined && { turn: parent.meta.turn }),
             wall_start: new Date(startMs).toISOString(),
-            wall_end: new Date().toISOString(),
+            wall_end: new Date(endMs).toISOString(), // when the step ended (before observing next_state)
             tick_start: tickStart,
-            tick_end: safe(() => bot.time.age),
+            tick_end: tickEnd,
             skill: { name, args, args_resolved: resolveArgs(name, args) },
             state: before,
             trace: null,
@@ -88,7 +93,7 @@ async function step(bot, name, fn, args = {}) {
             success: result ? result.success : false,
             reason: result ? result.reason : error && error.type === "SkillCancelled" ? "stopped" : "exception",
             details: result ? result.details : {},
-            duration: (Date.now() - startMs) / 1000,
+            duration: (endMs - runStart) / 1000,
             timed_out: false,
             error,
         });
