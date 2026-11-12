@@ -19,51 +19,59 @@ The brain never talks to Minecraft. The body handles reflexes and the details in
 
 ## Follow one call (read these first)
 When the brain asks `mine(oak_log, 3)`:
-1. `bot/src/api.js`: receives `POST /execute`, checks the request, one skill at a time.
-2. `bot/src/execute.js`: state before (`observe`), runs the skill while recording a trace, state after, writes one line.
-3. `bot/src/runSkill.js`: when a skill is stopped (its own time budget, no progress for 15 s, an alert: hurt or a
+1. `bot/src/api/api.js`: receives `POST /execute`, checks the request, one skill at a time.
+2. `bot/src/execution/execute.js`: state before (`observe`), runs the skill while recording a trace, state after, writes one line.
+3. `bot/src/execution/runSkill.js`: when a skill is stopped (its own time budget, no progress for 15 s, an alert: hurt or a
    new monster close, a 300 s hard cap), catches errors, really stops a stopped skill (`cancel.js`).
-4. `bot/src/skills/mine.js`: repeats `find` + `collect_block` until 3 logs are collected.
-5. `bot/src/skills/collect_block.js`: `break_block` (gets a viewpoint, digs) then `pick_up` (walks onto the items).
+4. `bot/src/skills/shortcuts/mine.js`: repeats `find` + `collect_block` until 3 logs are collected.
+5. `bot/src/skills/shortcuts/collect_block.js`: `break_block` (gets a viewpoint, digs) then `pick_up` (walks onto the items).
 
 On the Python side, `brain/agent.py` is the loop: state -> prompt -> LLM -> plan -> execute -> results -> again.
 
 ## Every file in one line
-**bot/** (the body)
-| File | Role |
-|---|---|
-| `bot.js` | creates the bot once; modes `serve` (API), `suite` (arena tests), `field` (field bench) |
-| `src/api.js` | the small HTTP API used by the brain |
-| `src/execute.js` | runs a skill and writes its journal line (always call this, never `runSkill` alone) |
-| `src/runSkill.js` | time limit and error capture around a skill |
-| `src/cancel.js` | makes a stopped skill unable to act (no "ghost" skill in the background) |
-| `src/state.js` | `observe(bot)`: THE definition of the state |
-| `src/trace.js` | what happens during a skill: positions and keys every tick, events, blocks, digs |
-| `src/movements.js` | pathfinder settings: jumps, digs a passage, pillars up, avoids lava and monsters |
-| `src/fixes.js` | fixes for Mineflayer bugs (window clicks, difficulty, freezing against walls) |
-| `src/commands.js` | `runCommand`: send a server command (/tp, /give...) |
-| `src/perception.js` | what the bot perceives: line of sight (default) or everything the client knows (x-ray); used by find, scan, the state's visibility marks |
-| `src/tags.js` | the game's block tags sent by the server (replaceable, leaves, beds...): game facts, not our lists |
-| `src/setup.js` | starting situation for the benches (place, inventory, day): `POST /setup`, field bench |
-| `src/run.js`, `version.js`, `logger.js` | run id, versions, where the journal is written |
-| `src/skills/catalogue.js` | what the LLM reads about each skill: description, parameters, failure reasons |
-| `src/skills/utils.js` | shared helpers (`gotoWatched` = walking with a stuck detector, pickup...) |
-| `src/skills/*.js` | one skill per file (see below) |
+**bot/** (the body). `bot.js` creates the bot once; modes `serve` (API), `suite` (arena tests), `field`
+(field bench). Under `src/`, one folder per job:
 
-**Skills** (each returns `{ success, reason, details }`)
-| Skill | Shown to the LLM | What it does |
+| Folder | Files | Role |
 |---|---|---|
-| `move_to(x, y, z, range)` | yes | walk somewhere (the bot handles obstacles itself) |
-| `find(target)` | yes | where are the nearest blocks or entities of a type |
-| `collect_block(x, y, z)` | yes | break one block AND pick up what drops (break_block + pick_up) |
-| `mine(block, count)` | yes | gather blocks of a type: find + collect_block, repeated |
-| `craft(item, count)` | yes | craft an item (needs a crafting table nearby for most recipes) |
-| `recipe(item)` | yes | question: how an item is crafted, one level (ingredients, how to get each) |
-| `place_block(item, x, y, z)` | yes | place a block from the inventory |
-| `explore(direction, distance)` | yes | go somewhere new when nothing is found |
-| `break_block(x, y, z)` | no (for now) | break one block, only that (reports what fell) |
-| `pick_up(item?, max_distance)` | no (for now) | pick up items lying on the ground nearby |
-| `scan`, `eat` | no (for now) | summary of the surroundings, eat |
+| `api/` | `api.js` | the small HTTP API used by the brain (`/state`, `/skills`, `/run`, `/execute`, `/setup`) |
+| | `setup.js` | starting situation for the benches (place, inventory, day): `POST /setup`, field bench |
+| `execution/` | `execute.js` | runs a skill and writes its journal line (always call this, never `runSkill` alone) |
+| | `runSkill.js` | when a skill is stopped (budget, no progress, alert, hard cap), error capture |
+| | `cancel.js` | makes a stopped skill unable to act (no "ghost" skill in the background) |
+| | `steps.js` | the journal lines of the skills called inside a shortcut (`parent_seq`) |
+| `journal/` | `trace.js` | what happens during a skill: positions and keys every tick, events, blocks, actions |
+| | `run.js`, `version.js`, `logger.js` | run id, versions (git commit), where the journal is written |
+| `observation/` | `state.js` | `observe(bot)`: THE definition of the state |
+| | `perception.js` | what the bot perceives: line of sight (default) or everything the client knows (x-ray) |
+| `game/` | `tags.js` | the game's tags sent by the server (replaceable, leaves, fluids...): game facts, not our lists |
+| | `movements.js` | pathfinder settings: jumps, digs a passage, pillars up, avoids lava and monsters |
+| | `fixes.js` | fixes for Mineflayer bugs (window clicks, inventory resync, difficulty, walls) |
+| | `commands.js` | `runCommand`: send a server command (/tp, /give...) |
+| `skills/` | `index.js` | the list of every skill (names are stable: inputs of the world model) |
+| | `catalogue.js` | what the LLM reads about each skill: description, parameters, failure reasons |
+| | `utils.js` | shared helpers (`gotoWatched` = walking with a stuck detector, pickup...) |
+| | `actions/`, `questions/`, `shortcuts/`, `low_level/` | one skill per file (see below) |
+
+**Skills** (each returns `{ success, reason, details }`; "LLM" = shown to the LLM, `SHOWN_TO_LLM`)
+| Folder | Skill | LLM | What it does |
+|---|---|---|---|
+| `actions/` | `move_to(x, y, z, range)` | yes | walk somewhere (the bot handles obstacles itself) |
+| | `explore(direction, distance)` | yes | go somewhere new when nothing is found |
+| | `place_block(item, x, y, z)` | yes | place a block from the inventory |
+| | `craft(item, count)` | yes | craft an item (walks to a crafting table when the recipe needs one) |
+| | `break_block(x, y, z)` | no | break one block, only that (reports what fell) |
+| | `pick_up(item?, max_distance)` | no | pick up items lying on the ground nearby |
+| | `eat(food?)` | no | eat from the inventory |
+| | `dig(direction, distance, slope, stop_at)` | no | dig a 1x2 tunnel or a staircase, stop when a block of interest comes into sight |
+| `questions/` | `find(target)` | yes | where are the nearest blocks or entities of a type (what the bot perceives) |
+| | `recipe(item \| uses)` | yes | one page of the recipe book, one level only, both ways |
+| | `craftable()` | yes | what the inventory allows to craft now |
+| | `scan(radius)` | no | summary of what is perceived around |
+| `shortcuts/` | `collect_block(x, y, z)` | yes | break one block AND pick up what drops (break_block + pick_up) |
+| | `mine(block, count)` | yes | gather blocks of a type: find + collect_block, repeated |
+| | `strip_mine(direction, blocks, ...)` | no | dig + collect_block: a tunnel that collects what it uncovers |
+| `low_level/` | `walk(yaw, distance)`, `look(yaw, pitch)`, `press(keys, ticks)` | no | without the pathfinder: a way out, varied data, a future learned controller |
 
 **brain/** (the mind, Python): `agent.py` loop, `llm.py` the single LLM call (replaceable provider),
 `render.py` every text the LLM reads, `body.py` HTTP client of the body, `journal.py` episode log,

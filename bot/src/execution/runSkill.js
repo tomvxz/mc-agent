@@ -1,5 +1,5 @@
 import { startSkill } from "./cancel.js";
-import { isHostile } from "./state.js";
+import { isHostile } from "../observation/state.js";
 
 // Stopping time for skills : HARD cap, no longer PROGRESSING, TIME CAP defined by the skill, ALERT for the brain
 const HARD_CAP_S = 300; // against bugs only
@@ -12,6 +12,10 @@ It is stopped at BUDGET_FACTOR * the estimate + margin
 const BUDGET_FACTOR = 3;
 const BUDGET_MARGIN_S = 10;
 const DEFAULT_BUDGET_S = 60; // a skill without an estimate
+
+// The brain's own time limit, for any skill: args.max_seconds. The skill is stopped at max_seconds + this
+// grace (a skill that watches its own end, like strip_mine, finishes cleanly before). Under the hard cap.
+const MAX_SECONDS_GRACE_S = 5;
 
 // No progress: nothing moved, was dug or changed in the inventory for this long
 const NO_PROGRESS_S = 15;
@@ -95,36 +99,64 @@ function alertWatcher(bot) {
     };
 }
 
-// limits (tests only): { hardCapS, noProgressS }
+// limits (tests only): { hardCapS, noProgressS, graceS }
 async function runSkill(bot, skill, args, limits = {}) {
     const start = Date.now();
     const hardCap = limits.hardCapS ?? HARD_CAP_S;
     const noProgressLimit = limits.noProgressS ?? NO_PROGRESS_S;
+    const grace = limits.graceS ?? MAX_SECONDS_GRACE_S;
 
-    // 1. Its budget, before starting: refuse a skill that plans to last longer than the hard cap
+    // 1. The brain's time limit, if it gave one
+    const maxSeconds = args?.max_seconds;
+    if (maxSeconds !== undefined && !(Number.isFinite(maxSeconds) && maxSeconds > 0))
+        return {
+            success: false,
+            reason: "invalid_args",
+            details: { max_seconds: maxSeconds },
+            duration: 0,
+        };
+    const brainLimit = maxSeconds !== undefined ? maxSeconds + grace : Infinity;
+
+    // 2. Its budget, before starting: refuse a skill that plans to last longer than the hard cap. A
+    //    max_seconds shorter than the budget is the brain accepting to stop it early: not too long
     const budget = stopAfter(bot, skill, args);
-    if (budget.estimate !== null && budget.seconds > hardCap)
+    const budgetLimit =
+        budget.estimate !== null
+            ? budget.seconds
+            : maxSeconds !== undefined
+              ? Infinity
+              : DEFAULT_BUDGET_S;
+    const planned = Math.min(budget.estimate !== null ? budget.seconds : Infinity, brainLimit);
+    if (planned !== Infinity && planned > hardCap)
         return {
             success: false,
             reason: "too_long",
-            details: {
-                estimated_seconds: Math.round(budget.estimate),
-                max_seconds: Math.floor((hardCap - BUDGET_MARGIN_S) / BUDGET_FACTOR),
-            },
+            details:
+                brainLimit <= budgetLimit
+                    ? { requested_seconds: maxSeconds, max_seconds: hardCap - grace }
+                    : {
+                          estimated_seconds: Math.round(budget.estimate),
+                          max_seconds: Math.floor((hardCap - BUDGET_MARGIN_S) / BUDGET_FACTOR),
+                      },
             duration: 0,
         };
 
-    // 2. Watch it while it runs: the first rule broken stops it
+    // 3. Watch it while it runs: the first rule broken stops it
     let timer;
     let checker;
     const stopped = new Promise((_, reject) => {
         const stop = (reason, details) =>
             reject(Object.assign(new Error(reason), { stop: { reason, details } }));
-        const limit = Math.min(budget.seconds, hardCap);
+        const limit = Math.min(budgetLimit, brainLimit, hardCap);
         timer = setTimeout(
             () =>
                 stop("timeout", {
-                    limit: budget.seconds <= hardCap ? "budget" : "hard_cap",
+                    limit:
+                        limit === hardCap
+                            ? "hard_cap"
+                            : limit === brainLimit
+                              ? "max_seconds"
+                              : "budget",
                     seconds: limit,
                     ...(budget.estimate !== null && {
                         estimated_seconds: Math.round(budget.estimate),
@@ -207,4 +239,4 @@ async function runSkill(bot, skill, args, limits = {}) {
 const STOP_REASONS = ["timeout", "no_progress", "alert"];
 
 export default runSkill;
-export { HARD_CAP_S, STOP_REASONS };
+export { HARD_CAP_S, MAX_SECONDS_GRACE_S, STOP_REASONS };

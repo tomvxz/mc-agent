@@ -1,4 +1,4 @@
-"""The link between the brain (Python) and the body (the Node bot, see bot/src/api.js).
+"""The link between the brain (Python) and the body (the Node bot, see bot/src/api/api.js).
 
 The body exposes 5 HTTP routes; this module turns them into 5 Python methods:
     state()                        -> the bot's observed state (position, health, inventory...)
@@ -122,8 +122,8 @@ class Body:
         count_blocks: list[str] | None = None,
     ) -> dict[str, Any]:
         """Teleport the bot onto the ground at column (x, z), with exactly this inventory, by day
-        and clear weather (bot/src/setup.js). Returns {success, reason, details}.
-        perception: "sight" or "all" for the skills that follow (bot/src/perception.js).
+        and clear weather (bot/src/api/setup.js). Returns {success, reason, details}.
+        perception: "sight" or "all" for the skills that follow (bot/src/observation/perception.js).
         count_blocks: blocks or groups ("#logs") to count within 32 blocks (details.blocks_within_32).
 
         Server commands, not a skill: not logged as a transition, never offered to the LLM.

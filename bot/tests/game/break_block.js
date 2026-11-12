@@ -90,6 +90,17 @@ const commonEdgeCases = [
         expect: "nothing_to_break",
     },
     {
+        // Every face hidden by stone: refused at once, without saying it is a log (no x-ray)
+        name: "log enclosed in stone, not seen",
+        setup: async (bot) => {
+            const [x, y, z] = P;
+            await placeAndWait(bot, `/fill ${x - 1} ${y} ${z - 1} ${x + 1} ${y + 2} ${z + 1} stone`, [x + 1, y + 2, z + 1], "stone");
+            await placeAndWait(bot, `/setblock ${x} ${y + 1} ${z} oak_log`, [x, y + 1, z], "oak_log");
+        },
+        args: { x: P[0], y: P[1] + 1, z: P[2] },
+        expect: "not_seen",
+    },
+    {
         name: "unbreakable barrier",
         setup: (bot) => placeAndWait(bot, `/setblock ${P.join(" ")} barrier`, P, "barrier"),
         args: { x: P[0], y: P[1], z: P[2] },

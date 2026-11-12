@@ -1,7 +1,7 @@
 // Small helpers shared by several skills (this is not a skill)
 import mineflayerPathfinder from "mineflayer-pathfinder";
-import { refuseIfCancelled } from "../cancel.js";
-import { MAX_DROP_DOWN, SCAFFOLDING_BLOCKS } from "../movements.js";
+import { refuseIfCancelled } from "../execution/cancel.js";
+import { MAX_DROP_DOWN, SCAFFOLDING_BLOCKS } from "../game/movements.js";
 const { goals } = mineflayerPathfinder;
 
 // Wait ms milliseconds, in steps of at most 50 ms. In a skill stopped by its time limit, throws at

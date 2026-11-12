@@ -9,9 +9,9 @@
 // test what we thought of; this bench finds what we did not think of.
 // Everything goes through execute() with source "test:field" (dev data, never for training).
 
-import execute from "../../src/execute.js";
-import { setupPlace } from "../../src/setup.js";
-import { inBlockTag } from "../../src/tags.js";
+import execute from "../../src/execution/execute.js";
+import { setupPlace } from "../../src/api/setup.js";
+import { inBlockTag } from "../../src/game/tags.js";
 import { drawLocations, summarize } from "./plan.js";
 
 const LIQUIDS = ["water", "lava"];
@@ -124,7 +124,7 @@ async function runField(bot, n, seed, only) {
     let played = 0;
     let replaced = 0;
 
-    // Count the server's position corrections during each skill (see "correction" in src/trace.js)
+    // Count the server's position corrections during each skill (see "correction" in src/journal/trace.js)
     let corrections = 0;
     bot.on("forcedMove", () => corrections++);
 

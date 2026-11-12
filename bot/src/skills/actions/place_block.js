@@ -1,6 +1,6 @@
 import mineflayerPathfinder from "mineflayer-pathfinder";
-import { inBlockTag } from "../tags.js";
-import { gotoWatched, makeVec3, movementFailureReason } from "./utils.js";
+import { inBlockTag } from "../../game/tags.js";
+import { gotoWatched, makeVec3, movementFailureReason } from "../utils.js";
 const { goals } = mineflayerPathfinder;
 
 // The 6 neighbours of a block: below, above, and the 4 sides

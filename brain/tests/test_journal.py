@@ -33,14 +33,14 @@ def test_a_full_episode_is_a_stream_of_numbered_events(tmp_path):
     with EpisodeLog(path=path) as log:
         start(log, run_id="run-x", scenario="arena:trees_3")
         first = log.turn(
-            new_messages=[{"role": "user", "content": "goal..."}],
+            messages=[{"role": "user", "content": "goal..."}],
             raw_response={"choices": []},
             plan=[{"skill": "mine", "args": {"block": "oak_log", "count": 3}}],
             latency=1.5,
             tokens={"prompt": 100, "completion": 20},
         )
         second = log.turn(
-            new_messages=[], raw_response="text", plan=None, parse_error="no tool call"
+            messages=[], raw_response="text", plan=None, parse_error="no tool call"
         )
         log.end(success=True, reason="done", skill_calls=4, final_state={"health": 20})
 
@@ -103,7 +103,7 @@ def test_ctrl_c_is_recorded_as_interrupted(tmp_path):
 def test_events_in_the_wrong_order_are_refused(tmp_path):
     log = EpisodeLog(path=tmp_path / "episodes.jsonl")
     with pytest.raises(RuntimeError):
-        log.turn(new_messages=[], raw_response=None, plan=None)  # before start
+        log.turn(messages=[], raw_response=None, plan=None)  # before start
     start(log)
     with pytest.raises(RuntimeError):
         start(log)  # twice
@@ -126,5 +126,5 @@ def test_unusual_objects_in_the_raw_response_do_not_lose_the_line(tmp_path):
     path = tmp_path / "episodes.jsonl"
     log = EpisodeLog(path=path)
     start(log)
-    log.turn(new_messages=[], raw_response={"when": object()}, plan=None)
+    log.turn(messages=[], raw_response={"when": object()}, plan=None)
     assert read(path)[1]["raw_response"]["when"].startswith("<object")

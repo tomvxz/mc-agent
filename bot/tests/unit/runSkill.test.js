@@ -1,6 +1,6 @@
 import assert from "node:assert";
 import test from "node:test";
-import runSkill from "../../src/runSkill.js";
+import runSkill from "../../src/execution/runSkill.js";
 import { sleep, waitUntil } from "../../src/skills/utils.js";
 import { fakeBot } from "./fakeBot.js";
 
@@ -137,6 +137,39 @@ test("a skill over its own budget is stopped (timeout, limit budget)", async () 
   assert.deepStrictEqual([r.reason, r.details.limit], ["timeout", "budget"]);
 });
 
+test("max_seconds: the brain's time limit stops any skill, and replaces the default of a skill without budget", async () => {
+  const forever = () => new Promise(() => {});
+  let r = await runSkill(fakeBot(), forever, { max_seconds: 0.05 }, { graceS: 0.05 });
+  assert.deepStrictEqual([r.reason, r.details.limit, r.details.seconds], ["timeout", "max_seconds", 0.1]);
+  // Shorter than the budget: the brain accepts to stop early, no too_long
+  forever.budget = () => 200;
+  r = await runSkill(fakeBot(), forever, { max_seconds: 0.05 }, { graceS: 0.05 });
+  assert.deepStrictEqual([r.reason, r.details.limit], ["timeout", "max_seconds"]);
+  // The skill receives max_seconds (to finish cleanly on its own)
+  const seen = [];
+  const quick = async (b, args) => {
+    seen.push(args.max_seconds);
+    return { success: true, reason: "ok", details: {} };
+  };
+  assert.strictEqual((await runSkill(fakeBot(), quick, { max_seconds: 30 })).reason, "ok");
+  assert.deepStrictEqual(seen, [30]);
+});
+
+test("max_seconds: over the hard cap -> too_long; not a positive number -> invalid_args", async () => {
+  let started = false;
+  const skill = async () => {
+    started = true;
+    return { success: true, reason: "ok", details: {} };
+  };
+  let r = await runSkill(fakeBot(), skill, { max_seconds: 400 });
+  assert.deepStrictEqual([r.reason, r.details.requested_seconds, r.details.max_seconds], ["too_long", 400, 295]);
+  for (const bad of [0, -5, "60", Infinity]) {
+    r = await runSkill(fakeBot(), skill, { max_seconds: bad });
+    assert.strictEqual(r.reason, "invalid_args", String(bad));
+  }
+  assert.strictEqual(started, false);
+});
+
 test("a skill that makes no progress is stopped (no_progress); moving counts as progress", async () => {
   const bot = fakeBot();
   const r = await runSkill(bot, () => new Promise(() => {}), {}, { noProgressS: 0.3 });
@@ -185,6 +218,29 @@ test("an alert stops the skill: hurt, or a NEW monster close (not one already th
     await new Promise(() => {});
   }, {});
   assert.deepStrictEqual([r2.reason, r2.details.trigger, r2.details.entity], ["alert", "hostile_near", "husk"]);
+
+  // Compared with the previous check, not the start: regenerated above the start, then hit = an alert
+  const regen = fakeBot();
+  regen.health = 15;
+  const r3 = await runSkill(regen, async () => {
+    await sleep(400);
+    regen.health = 20; // regeneration
+    await sleep(400);
+    regen.health = 17; // a hit, still above the 15 of the start
+    await new Promise(() => {});
+  }, {});
+  assert.deepStrictEqual([r3.reason, r3.details.trigger, r3.details.health_before, r3.details.health], ["alert", "damage", 20, 17]);
+
+  // The monster close at the start goes away, then comes back: an alert
+  const back = fakeBot({ entities: { 1: monster(1, "zombie", 3) } });
+  const r4 = await runSkill(back, async () => {
+    await sleep(400);
+    back.entities[1] = monster(1, "zombie", 12); // away
+    await sleep(400);
+    back.entities[1] = monster(1, "zombie", 3); // back
+    await new Promise(() => {});
+  }, {});
+  assert.deepStrictEqual([r4.reason, r4.details.entity], ["alert", "zombie"]);
 });
 
 test("outside a skill, sleep and waitUntil are plain waits", async () => {

@@ -12,9 +12,10 @@ function isHostile(bot, e) {
     return bot.registry.entitiesByName[e.name]?.category === "Hostile mobs";
 }
 
-// Grid of (2*8+1)^3 = 4913 blocks around the feet: the reach of actions (4.5), jumps and falls, a few
-// blocks of the way. Measured: 11 KB, +13 ms over radius 5. Farther: in_sight (32 blocks, what is seen).
-const GRID_RADIUS = 8;
+// Grid of (2*16+1)^3 = 35937 blocks around the feet: the reach of actions (4.5), jumps and falls, the
+// tunnel and the walls around it. Measured (2026-10-25): 86 KB and ~33 ms (radius 8: 11 KB, ~5 ms). Chosen
+// large on purpose: a model can crop a large grid, never grow a small one. Farther: in_sight (32 blocks).
+const GRID_RADIUS = 16;
 const ENTITY_RADIUS = 16;
 const MAX_ENTITIES = 20;
 
@@ -35,7 +36,9 @@ function attempt(fn) {
 function blockState(b) {
     const props = b.getProperties ? b.getProperties() : {};
     const keys = Object.keys(props).sort();
-    return keys.length === 0 ? b.name : `${b.name}[${keys.map((k) => `${k}=${props[k]}`).join(",")}]`;
+    return keys.length === 0
+        ? b.name
+        : `${b.name}[${keys.map((k) => `${k}=${props[k]}`).join(",")}]`;
 }
 
 // One bit per cell, 1 = visible, packed in bytes (cell i -> byte i >> 3, bit i & 7), base64
@@ -48,7 +51,7 @@ function packBits(bits) {
 }
 
 // Blocks around the feet, encoded compactly: a palette of block states + one palette index per cell,
-// and which cells the bot could see (visible, packBits; see src/perception.js). Cell order: for dy from -R to R, for dz from
+// and which cells the bot could see (visible, packBits; see src/observation/perception.js). Cell order: for dy from -R to R, for dz from
 // -R to R, for dx from -R to R (index = (dy+R)*S*S + (dz+R)*S + (dx+R), with S = 2R+1). Unloaded cells
 // are null (and not visible).
 function blockGrid(bot, R) {
@@ -74,7 +77,13 @@ function blockGrid(bot, R) {
             }
         }
     }
-    return { origin: [feet.x, feet.y, feet.z], radius: R, palette, cells, visible: packBits(visible) };
+    return {
+        origin: [feet.x, feet.y, feet.z],
+        radius: R,
+        palette,
+        cells,
+        visible: packBits(visible),
+    };
 }
 
 // What the bot looks at (the game's crosshair, within reach: 4.5 blocks): the block and the face,
@@ -86,7 +95,11 @@ function lookingAt(bot) {
         block: blockState(b),
         position: [b.position.x, b.position.y, b.position.z],
         face: b.face ?? null, // 0 = bottom, 1 = top, 2 = north, 3 = south, 4 = west, 5 = east
-        distance: r1(b.intersect ? b.intersect.distanceTo(eyes(bot)) : b.position.distanceTo(bot.entity.position)),
+        distance: r1(
+            b.intersect
+                ? b.intersect.distanceTo(eyes(bot))
+                : b.position.distanceTo(bot.entity.position),
+        ),
     };
 }
 
@@ -94,10 +107,10 @@ function lookingAt(bot) {
 function slot(item) {
     if (!item) return null;
     const s = { name: item.name, count: item.count };
-    if (item.maxDurability)
-        s.durability_left = item.maxDurability - (item.durabilityUsed || 0);
+    if (item.maxDurability) s.durability_left = item.maxDurability - (item.durabilityUsed || 0);
     const enchants = attempt(() => item.enchants);
-    if (enchants && enchants.length > 0) s.enchantments = enchants.map((e) => ({ name: e.name, level: e.lvl }));
+    if (enchants && enchants.length > 0)
+        s.enchantments = enchants.map((e) => ({ name: e.name, level: e.lvl }));
     return s;
 }
 
@@ -173,18 +186,14 @@ function observe(bot) {
     const eye = attempt(() => eyes(bot));
 
     return {
-        // How the questions (find, scan) and the brain's view filter it (src/perception.js): "sight" = only
+        // How the questions (find, scan) and the brain's view filter it (src/observation/perception.js): "sight" = only
         // what is marked visible, "all" = everything
         perception: perception(),
         // Body
         position: [r3(pos.x), r3(pos.y), r3(pos.z)],
         yaw: attempt(() => r3(e.yaw)),
         pitch: attempt(() => r3(e.pitch)),
-        velocity: attempt(() => [
-            r3(e.velocity.x),
-            r3(e.velocity.y),
-            r3(e.velocity.z),
-        ]),
+        velocity: attempt(() => [r3(e.velocity.x), r3(e.velocity.y), r3(e.velocity.z)]),
         on_ground: attempt(() => e.onGround),
         in_water: attempt(() => !!e.isInWater),
         in_lava: attempt(() => !!e.isInLava),
@@ -249,17 +258,12 @@ function observe(bot) {
         // a player does not see it.
         entities: attempt(() =>
             Object.values(bot.entities)
-                .filter(
-                    (x) =>
-                        x !== e &&
-                        x.position &&
-                        x.position.distanceTo(pos) <= ENTITY_RADIUS,
-                )
+                .filter((x) => x !== e && x.position && x.position.distanceTo(pos) <= ENTITY_RADIUS)
                 .map((x) => entityView(bot, x, pos, eye))
                 .sort((a, b) => a.distance - b.distance)
                 .slice(0, MAX_ENTITIES),
         ),
-        // What is in sight within 32 blocks (src/perception.js): what a player has on screen when looking
+        // What is in sight within 32 blocks (src/observation/perception.js): what a player has on screen when looking
         // around, not what lies behind walls. Offsets from the bot, like the entities.
         in_sight: attempt(() => sightView(bot, pos)),
         blocks: attempt(() => blockGrid(bot, GRID_RADIUS)),

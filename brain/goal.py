@@ -65,11 +65,11 @@ def is_met(condition: Condition, state: dict[str, Any] | None) -> bool:
 
 
 def is_definition_turn(event: dict[str, Any]) -> bool:
-    """The llm_turn of the define_goal call: a separate conversation, so its new_messages start
-    with its own system message (docs/journal.md)."""
+    """The llm_turn of the define_goal call, a separate conversation (docs/journal.md)."""
+    if event.get("type") != "llm_turn":
+        return False
+    if "conversation" in event:
+        return event["conversation"] == "goal_definition"
+    # Version 1: only the messages added were logged, and only this call started with a system message
     messages = event.get("new_messages") or []
-    return (
-        event.get("type") == "llm_turn"
-        and bool(messages)
-        and messages[0].get("role") == "system"
-    )
+    return bool(messages) and messages[0].get("role") == "system"

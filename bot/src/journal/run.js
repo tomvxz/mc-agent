@@ -22,7 +22,7 @@ let current = null; // the current run, or null (unit tests run without one)
 function dataRoot() {
     return (
         process.env.MC_DATA_DIR ||
-        path.resolve(import.meta.dirname, "../../data")
+        path.resolve(import.meta.dirname, "../../../data")
     );
 }
 

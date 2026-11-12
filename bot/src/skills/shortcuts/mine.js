@@ -1,19 +1,19 @@
 // Shortcut: mine `count` blocks of a type = find + collect_block (break_block + pick_up), repeated.
 // It is only an assembly of primitives (see CLAUDE.md, skill philosophy).
-import { step } from "../steps.js";
-import { findBlockTag } from "../tags.js";
+import { step } from "../../execution/steps.js";
+import { findBlockTag } from "../../game/tags.js";
 import collect_block from "./collect_block.js";
-import find from "./find.js";
-import { gainedSince, inventoryCounts, walkSeconds } from "./utils.js";
+import find from "../questions/find.js";
+import { gainedSince, inventoryCounts, walkSeconds } from "../utils.js";
 
-// Failures that only concern THIS block: try the next one (not_collected: its item fell out of reach)
+// Failures that only concern THIS block: try the next one
 const TRY_ANOTHER = [
     "no_path",
     "path_timeout",
     "interrupted",
     "stuck",
     "nothing_to_break",
-    "not_collected",
+    "not_seen",
 ];
 const MAX_ATTEMPTS = 20;
 
@@ -39,6 +39,7 @@ async function mine(bot, { block, count = 1 } = {}) {
     const tried = new Set(); // positions already attempted, so the same block is never targeted twice
     let dug = 0;
     let unreachable = 0;
+    let not_picked_up = 0; // blocks broken whose item was not picked up right away
     let cleared = 0; // blocks broken only to see a target (leaves...): what the trip cost
 
     while (dug < count) {
@@ -73,6 +74,13 @@ async function mine(bot, { block, count = 1 } = {}) {
         cleared += r.details.cleared || 0;
         if (r.success) {
             dug++;
+        } else if (r.reason === "not_collected") {
+            // The block IS broken, only its item is still on the ground: it counts as dug, and the item may
+            // be picked up on the way to the next block (seen in the arena: 2 logs collected for 2 asked, but
+            // the first one was counted as unreachable -> "partial"). The final check below says if items
+            // are really missing.
+            dug++;
+            not_picked_up++;
         } else if (TRY_ANOTHER.includes(r.reason)) {
             unreachable++;
         } else {
@@ -94,7 +102,7 @@ async function mine(bot, { block, count = 1 } = {}) {
         return {
             success: false,
             reason: "not_collected",
-            details: { dug, collected: gainedSince(bot, before), ...(cleared && { cleared }) },
+            details: { dug, collected: gainedSince(bot, before), not_picked_up, ...(cleared && { cleared }) },
         };
     return {
         success: true,

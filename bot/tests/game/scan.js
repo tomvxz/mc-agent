@@ -1,5 +1,5 @@
 import { waitUntil } from "../../src/skills/utils.js";
-import { isHostile } from "../../src/state.js";
+import { isHostile } from "../../src/observation/state.js";
 import { CENTER as C, placeAndWait, runCommand } from "./arena.js";
 
 // What we place, and what scan must count exactly (all in plain sight from the center)

@@ -5,7 +5,7 @@ import {
     itemsOnGround,
     movementFailureReason,
     walkOnto,
-} from "./utils.js";
+} from "../utils.js";
 
 const MAX_ITEMS = 10; // at most this many items picked up in one call
 

@@ -5,7 +5,7 @@ import {
     round1,
     trackWorldChanges,
     WALK_SPEED,
-} from "./utils.js";
+} from "../utils.js";
 const { goals } = mineflayerPathfinder;
 
 // In Minecraft, north is towards -z and east towards +x

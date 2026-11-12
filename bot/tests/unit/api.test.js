@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { startApi } from "../../src/api.js";
+import { startApi } from "../../src/api/api.js";
 import { CATALOGUE, SHOWN_TO_LLM } from "../../src/skills/catalogue.js";
 import skills from "../../src/skills/index.js";
 import { fakeBot } from "./fakeBot.js";
@@ -51,6 +51,21 @@ test("the catalogue describes exactly the skills in the code", () => {
       Object.keys(entry.reasons).length > 0,
       `${name}: no failure reason`,
     );
+  }
+});
+
+// The journal's args_resolved comes from the catalogue's defaults: they must be the ones the code uses.
+// Read from the first line of each skill: async function name(bot, { a, b = 8, c = "level" } = {})
+test("the catalogue's defaults are the skills' own defaults", () => {
+  for (const [name, skill] of Object.entries(skills)) {
+    const signature = skill.toString().split("\n")[0];
+    const inCode = {};
+    for (const [, param, value] of signature.matchAll(/(\w+) = ("[^"]*"|-?[\d.]+|true|false)/g))
+      inCode[param] = JSON.parse(value);
+    const inCatalogue = {};
+    for (const [param, schema] of Object.entries(CATALOGUE[name].parameters.properties))
+      if (schema.default !== undefined) inCatalogue[param] = schema.default;
+    assert.deepStrictEqual(inCatalogue, inCode, `${name}: catalogue defaults differ from the code`);
   }
 });
 
@@ -103,7 +118,7 @@ test("POST /execute runs the skill, returns the result and logs episode_id and t
   const line = lastLine();
   assert.deepStrictEqual(
     [line.schema_version, line.source, line.episode_id, line.turn],
-    [9, "brain", "ep-1", 1],
+    [10, "brain", "ep-1", 1],
   );
 });
 

@@ -1,5 +1,5 @@
 import { waitUntil } from "../../src/skills/utils.js";
-import { isHostile } from "../../src/state.js";
+import { isHostile } from "../../src/observation/state.js";
 import { CENTER as C, placeAndWait, runCommand } from "./arena.js";
 
 // Logs at known distances: the nearest must come first

@@ -96,23 +96,61 @@ function fixWallContact() {
 // 6 planks) leaves the bot's view of its inventory wrong. Each craft's last click is not confirmed by
 // the server; Mineflayer knows it and resyncs the window after a crafting TABLE (bot._syncWindow, in
 // lib/plugins/craft.js), but not after the inventory grid.
-// Fix: in the 2x2 grid, craft one time at a time and resync the inventory after each (the same
-// resync Mineflayer does for a table; about one round trip each). With a table: unchanged.
-const SYNC_MAX_MS = 2000; // the server answers a resync at once: never wait longer than this
+// Fix: in the 2x2 grid, craft one time at a time and resync the inventory after each; with a table, resync
+// after it; and always once BEFORE the first click (the view may be stale already: a /give, a table just closed).
+//
+// A resync must wait for the server to be DONE answering, not for the first full inventory packet:
+// clicks sent in a burst each carry an old state id, and the server answers some of them with the whole
+// inventory too. Seen in the arena (2026-11-12): Mineflayer's own wait (the next inventory packet) ended
+// after ~1 ms, on an OLD answer still on its way (a real round trip takes at least one server tick, 50 ms),
+// the bot clicked on a stale view (8 planks asked, 4 made), then believed it held planks and hung.
+// So: ask, then wait until no packet about this window has come for SYNC_QUIET_MS (the server answers at
+// its ticks: 3 ticks of silence = it has nothing left to send), at most SYNC_MAX_MS.
+const SYNC_QUIET_MS = 150;
+const SYNC_MAX_MS = 2000;
+function resyncWindow(bot, window) {
+    return new Promise((resolve) => {
+        let answered = false;
+        let quiet = null;
+        const events = ["window_items", "set_slot", "set_player_inventory"];
+        const finish = () => {
+            clearTimeout(cap);
+            clearTimeout(quiet);
+            for (const name of events) bot._client.removeListener(name, onPacket);
+            resolve(answered);
+        };
+        const onPacket = function (packet) {
+            // set_player_inventory (no window id) is about the player's inventory: window 0
+            const id = packet.windowId ?? 0;
+            if (id !== window.id) return;
+            if (packet.items) answered = true; // a full window (window_items)
+            if (!answered) return;
+            clearTimeout(quiet);
+            quiet = setTimeout(finish, SYNC_QUIET_MS);
+        };
+        const cap = setTimeout(finish, SYNC_MAX_MS);
+        for (const name of events) bot._client.on(name, onPacket);
+        // Mineflayer sends the request (a click with an impossible state id); its own wait is not used
+        Promise.resolve(bot._syncWindow(window)).catch(() => {});
+    });
+}
+
 function fixCraftSync(bot) {
     const craft = bot.craft.bind(bot);
-    const sync = () =>
-        Promise.race([
-            bot._syncWindow(bot.inventory),
-            new Promise((r) => setTimeout(r, SYNC_MAX_MS)),
-        ]);
     bot.craft = async (recipe, count = 1, craftingTable) => {
-        if (craftingTable) return craft(recipe, count, craftingTable);
+        await resyncWindow(bot, bot.inventory); // start from the server's view
+        if (craftingTable) {
+            // Mineflayer resyncs the table's window itself, with the same too-early wait: resync the
+            // inventory once the table is closed (the 2x2 crafts after a table failed in the arena)
+            await craft(recipe, count, craftingTable);
+            await resyncWindow(bot, bot.inventory);
+            return;
+        }
         for (let i = 0; i < count; i++) {
             await craft(recipe, 1, craftingTable);
-            await sync();
+            await resyncWindow(bot, bot.inventory);
         }
     };
 }
 
-export { fixCraftSync, fixDifficulty, fixStateId, fixWallContact, WALL_GAP };
+export { fixCraftSync, fixDifficulty, fixStateId, fixWallContact, resyncWindow, SYNC_QUIET_MS, WALL_GAP };

@@ -6,7 +6,7 @@ import { execSync } from 'node:child_process'
 import path from 'node:path'
 
 function computeCodeVersion() {
-    const repo = path.resolve(import.meta.dirname, '../..')
+    const repo = path.resolve(import.meta.dirname, '../../..')
     try {
         const run = (cmd) => execSync(cmd, { cwd: repo, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim()
         const commit = run('git rev-parse --short HEAD')

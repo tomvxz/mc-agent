@@ -2,7 +2,7 @@
 // them. The direction comes from where the bot looks (see look). RAW input, on purpose: no instinct and
 // no danger check (walk has them); what happened is in the result and the trace. Not shown to the LLM
 // for now: for tactics, scripted and random exploration (varied data), and later a learned controller.
-import { round1, sleep } from "./utils.js";
+import { round1, sleep } from "../utils.js";
 
 const KEYS = ["forward", "back", "left", "right", "jump", "sprint", "sneak"];
 const MAX_TICKS = 40; // 2 s

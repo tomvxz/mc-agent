@@ -161,6 +161,37 @@ strategy. Consequences:
 - So: freeze only the skills that will be collected (names, arguments, behavior), and keep adding skills
   as goals need them (CLAUDE.md: add by frequency of `missing_capability`, not by intuition).
 
+### Decided for stage A: digging to find what is hidden (2026-10-23; written: `skills/actions/dig.js`, `skills/shortcuts/strip_mine.js`)
+Hidden blocks are found by DIGGING, never by asking: `break_block` refuses a block not in sight
+(`not_seen`, without saying what it is). How a player mines: caves (ore visible on the walls: `in_sight`,
+then `mine`), or straight tunnels.
+- Primitive `dig(direction, distance, slope?, stop_at?)`: a tunnel the size of the bot (1 wide, 2 high),
+  straight; `slope` `up` / `down` = a staircase, never straight up or down (lava, falls, gravel). Same instincts as `walk` (lava, water, drop).
+  `stop_at` (names or game groups): stops as soon as one of them COMES into sight (compared with what was
+  in sight when it started, otherwise a block skipped earlier would stop it at every step).
+  Details: what was dug, what came into sight.
+- Shortcut (name to choose, e.g. `strip_mine(direction, blocks, max_seconds?, until?)`) = `dig` +
+  `collect_block` repeated: dig straight; whenever blocks of the list are in sight, collect EVERY one within
+  reach of the tunnel (all kinds of the list in the same tunnel, veins too: they come into sight as they
+  are uncovered), at most a few blocks (3-4) away from the tunnel axis (otherwise it follows a cave and is
+  no longer a tunnel); back to the axis, and on. Stops when the time is over (`max_seconds`: a normal end,
+  asked by the brain), when the inventory has `until` (the goal-condition format, `{"diamond": 32,
+  "redstone": 16}`; the blocks to aim at come from the game's drops), whichever comes first (`partial` if
+  `until` is not met when the time is over), at the maximum distance, on an alert or a danger.
+- Missing tool: checked at the start against the inventory (the game's `harvestTools`): kinds that cannot be
+  harvested are REMOVED and the shortcut runs with the rest, reported in `details.skipped` (kind -> tools),
+  not a failure. Refused at once (`no_tool`) only when nothing harvestable is left, or when an `until`
+  count cannot be reached (digging for nothing until the time is over). A tool that breaks on the way: the
+  kinds it made possible go to `skipped` from then on.
+- Accepted limit (by design): a 1x2 tunnel only shows the blocks touching it (6 per step). Finding more is
+  STRATEGY (parallel tunnels 2-3 apart, depth), chosen by the brain over several calls, not the skill.
+  A wider tunnel option only if the measurements ask for it.
+- `max_seconds` for EVERY skill (applied by `runSkill`, under the hard cap): the brain's own time limit,
+  the first step towards `too_long` becoming a brain decision. Long tunnels make full sense once the hard
+  cap is removed; until then the shortcut returns what it got and the brain calls it again.
+- Each `dig` and `collect_block` has its own journal line (`parent_seq`): short horizons for the world
+  model even when the top call lasts minutes.
+
 ## 9. The stages, in dependency order
 
 | # | Stage | Depends on | Success criterion |

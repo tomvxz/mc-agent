@@ -1,5 +1,5 @@
 import { waitUntil } from "../../src/skills/utils.js";
-import { isHostile } from "../../src/state.js";
+import { isHostile } from "../../src/observation/state.js";
 import { buildOak, CENTER as C, giveAndWait, MAX, MIN, placeAndWait, runCommand } from "./arena.js";
 
 // A wall across the whole arena at z = C.z + 5, from y to y + h - 1

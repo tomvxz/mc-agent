@@ -3,8 +3,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import execute, { inventoryChange } from "../../src/execute.js";
-import { observe, trackDeaths } from "../../src/state.js";
+import execute, { inventoryChange, settleMs } from "../../src/execution/execute.js";
+import { observe, trackDeaths } from "../../src/observation/state.js";
 import { fakeBot } from "./fakeBot.js";
 
 // Temporary journal: fake lines are never written to data/
@@ -52,7 +52,7 @@ test("v9 line: minimal identity, times, args_resolved, result", async () => {
     turn: 0,
   });
   const d = last();
-  assert.strictEqual(d.schema_version, 9);
+  assert.strictEqual(d.schema_version, 10);
   assert.deepStrictEqual([d.source, d.episode_id, d.turn], ["unit", "ep-1", 0]);
   assert.strictEqual(typeof d.seq, "number");
   // Run-level facts are not repeated on every line (they are in runs.jsonl)
@@ -71,7 +71,7 @@ test("v9 line: minimal identity, times, args_resolved, result", async () => {
     assert.ok(!(field in d), `${field} should not be on the line`);
   }
   assert.deepStrictEqual([d.tick_start, d.tick_end], [5000, 5000]);
-  assert.ok(Date.parse(d.wall_end) >= Date.parse(d.wall_start));
+  assert.ok(Date.parse(d.ended_at) >= Date.parse(d.started_at));
   assert.deepStrictEqual(d.skill.args_resolved, {
     target: "oak_log",
     count: 5,
@@ -90,13 +90,14 @@ test("v9 line: minimal identity, times, args_resolved, result", async () => {
     assert.ok(!(field in d), `${field} should not be on the line`);
   }
   assert.deepStrictEqual([d.timed_out, d.error], [false, null]);
+  assert.strictEqual(d.settle_ticks, 6); // next_state observed 6 server ticks after the skill
 });
 
-test("state and next_state share one full format (observe), with a 17x17x17 grid", async () => {
+test("state and next_state share one full format (observe), with a 33x33x33 grid", async () => {
   await execute(fakeBot({ inventory: { bread: 2 } }), "scan", {}, "unit");
   const d = last();
   for (const s of [d.state, d.next_state]) {
-    assert.strictEqual(s.blocks.cells.length, 4913);
+    assert.strictEqual(s.blocks.cells.length, 35937);
     assert.deepStrictEqual(s.blocks.palette, ["air"]);
     assert.deepStrictEqual(s.inventory, { bread: 2 });
     assert.strictEqual(s.difficulty, "easy");
@@ -246,8 +247,28 @@ test("the steps inside a shortcut get their own lines, linked by parent_seq, wit
     ["break_block", "nothing_to_break", top.seq, null],
   );
   assert.ok(stepLine.seq > top.seq); // seq is given at the start
+  assert.deepStrictEqual([stepLine.settle_ticks, top.settle_ticks], [0, 6]); // no wait after a step
   assert.deepStrictEqual([stepLine.episode_id, stepLine.turn, stepLine.source], ["ep-2", 3, "unit"]);
   // Its duration is the step itself, inside its wall time (v8 counted the observations too)
-  const span = (Date.parse(stepLine.wall_end) - Date.parse(stepLine.wall_start)) / 1000;
+  const span = (Date.parse(stepLine.ended_at) - Date.parse(stepLine.started_at)) / 1000;
   assert.ok(stepLine.duration <= span + 0.001, `${stepLine.duration} > ${span}`);
+});
+
+test("the wait before next_state is 6 ticks at the measured tick rate, at most 2 s", (t) => {
+  const bot = fakeBot();
+  let now = 1_000_000;
+  t.mock.method(Date, "now", () => now);
+  assert.strictEqual(settleMs(bot), 300); // nothing measured yet: 20 ticks/s
+  const update = (age, ms) => {
+    now += ms;
+    bot.time.age = age;
+    bot.emit("time");
+  };
+  update(5000, 0);
+  update(5020, 1000);
+  assert.strictEqual(settleMs(bot), 300); // healthy server
+  update(5030, 1000);
+  assert.strictEqual(settleMs(bot), 600); // 10 ticks/s: twice as long
+  update(5031, 1000);
+  assert.strictEqual(settleMs(bot), 2000); // 1 tick/s: capped
 });

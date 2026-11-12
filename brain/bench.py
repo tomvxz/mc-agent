@@ -40,7 +40,7 @@ SPREAD = 5000  # places are drawn in [-SPREAD, SPREAD] on x and z (far: more fre
 # A place without safe ground (ocean, lava) is replaced by the next one, among the first MAX_DRAWS draws.
 # Not a budget per wanted place: the used places are skipped, so the ones left first in a seed are the
 # oceans that failed in every run before (seed 1, 2026-10-21: 10 candidates, all oceans).
-# Cheap: the server refuses an ocean at once (src/setup.js).
+# Cheap: the server refuses an ocean at once (src/api/setup.js).
 MAX_DRAWS = 100
 USED_RADIUS = 100  # a place closer than this to a place already played is not fresh
 SCENARIO = re.compile(r"bench:[^:]+:seed(-?\d+):place(\d+)")

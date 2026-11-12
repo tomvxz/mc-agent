@@ -1,4 +1,4 @@
-import { waitUntil } from "./utils.js";
+import { waitUntil } from "../utils.js";
 
 // Foods never picked automatically (poison, teleportation...)
 const AVOID = [

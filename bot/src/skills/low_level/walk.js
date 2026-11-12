@@ -3,7 +3,7 @@
 // no digging, no pillaring). It jumps up one-block steps and stops in front of a wall, a drop of more
 // than 3 blocks, water or lava. Useful when the pathfinder is stuck (a short way out), and to collect
 // varied, short movements. Not shown to the LLM for now (see SHOWN_TO_LLM).
-import { dangerAhead, facing, makeVec3, round1, sleep, WALK_SPEED } from "./utils.js";
+import { dangerAhead, facing, makeVec3, round1, sleep, WALK_SPEED } from "../utils.js";
 
 const MAX_DISTANCE = 8;
 const NO_MOVE_MS = 1500; // pushing forward without moving for this long = blocked

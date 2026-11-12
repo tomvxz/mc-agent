@@ -106,7 +106,8 @@ def run_episode(
                 return finish(False, "llm_error", str(e))
             condition, error = (None, reply.parse_error) if reply.parse_error else goals.parse_condition(reply.calls)
             log.turn(
-                new_messages=definition,
+                messages=definition,
+                conversation="goal_definition",
                 raw_response=reply.raw,
                 plan=[],
                 parse_error=error,
@@ -121,9 +122,6 @@ def run_episode(
             "content": render.render_goal(goal, start_state, progress(start_state)),
         }
         messages = [{"role": "system", "content": system}, first]
-        new_messages = [
-            first
-        ]  # what was added since the previous LLM call (recorded per turn)
         shown_state = start_state  # the state shown to the LLM at the previous turn
         last_failure = None  # (skill, args, reason) of the previous turn's failure
         counted = 0  # turns counted against max_turns (a first empty answer is not counted)
@@ -136,7 +134,7 @@ def run_episode(
             except LLMError as e:
                 return finish(False, "llm_error", str(e))
             turn = log.turn(
-                new_messages=new_messages,
+                messages=messages,
                 raw_response=reply.raw,
                 plan=reply.plan,
                 missing_capability=reply.missing_capability,
@@ -147,7 +145,6 @@ def run_episode(
             )
             answer = reply.history_message()
             messages.append(answer)
-            new_messages = [answer]
 
             # An EMPTY answer (no text, no usable tool call) does not use a turn, once in a row.
             # Seen with qwen2.5:3b + Ollama when skills were not tools: the model called a skill
@@ -167,7 +164,6 @@ def run_episode(
                     "content": render.render_parse_error(reply.parse_error),
                 }
                 messages.append(feedback)
-                new_messages.append(feedback)
                 continue
 
             # 3. Nothing to run: the LLM says the goal is reached (or only said what it misses)
@@ -184,14 +180,12 @@ def run_episode(
                     }
                 ]
                 messages += feedback
-                new_messages += feedback
                 continue
             if not plan:
                 feedback = answers(reply, [], catalogue) + [
                     {"role": "user", "content": render.render_empty_plan()}
                 ]
                 messages += feedback
-                new_messages += feedback
                 continue
 
             # 4. Run the plan, skill by skill, stop at the first failure
@@ -242,7 +236,6 @@ def run_episode(
                 {"role": "user", "content": text}
             ]
             messages += feedback
-            new_messages += feedback
 
         return finish(False, "max_turns")
 

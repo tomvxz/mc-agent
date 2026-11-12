@@ -206,7 +206,7 @@ def _block_below(state: dict[str, Any]) -> str | None:
 
 def render_state(state: dict[str, Any] | None) -> str:
     """A short text view of the state (the block grid is left out on purpose). What it lists is what
-    the bot perceives (bot/src/perception.js): by default, what is in line of sight."""
+    the bot perceives (bot/src/observation/perception.js): by default, what is in line of sight."""
     if state is None:
         return "State: unavailable (the bot may be dead or disconnected)."
     x, y, z = state["position"]
@@ -228,7 +228,7 @@ def render_state(state: dict[str, Any] | None) -> str:
     held = state.get("held_item")
     lines.append(f"Holding: {held['name'] if held else 'nothing'}.")
 
-    # Only what the bot perceives: with perception "sight", the entities it sees (bot/src/perception.js)
+    # Only what the bot perceives: with perception "sight", the entities it sees (bot/src/observation/perception.js)
     entities = [
         e for e in state.get("entities") or [] if state.get("perception") != "sight" or e.get("visible") is not False
     ]

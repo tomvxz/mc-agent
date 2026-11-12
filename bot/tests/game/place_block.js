@@ -1,7 +1,7 @@
 import { CENTER as C, giveAndWait, placeAndWait } from "./arena.js";
 
 // A block in the cell where the bot will place (plants need a grass block below, the floor is stone).
-// It checks the game's rule for minecraft:replaceable (src/tags.js) in the real game.
+// It checks the game's rule for minecraft:replaceable (src/game/tags.js) in the real game.
 const putInCell = (dx, dz, block, name = block) => async (bot) => {
     await giveCobblestone(bot);
     const [x, z] = [C.x + dx, C.z + dz];

@@ -5,8 +5,8 @@
 //   uses: what is crafted DIRECTLY from it? (an item or a group: "birch_log", "#logs"), like the
 //         "usage" section of the wiki.
 // Nothing about how to get an ingredient
-import { findItemTag } from "../tags.js";
-import { recipeNeeds } from "./craft.js";
+import { findItemTag } from "../../game/tags.js";
+import { recipeNeeds } from "../actions/craft.js";
 
 // The item ids of a name: an item, or a game group of items ("#planks"); null if neither
 function itemIds(bot, name) {

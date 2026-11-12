@@ -3,7 +3,7 @@
 
 import { EventEmitter } from 'node:events'
 import minecraftData from 'minecraft-data'
-import { recordTags } from '../../src/tags.js'
+import { recordTags } from '../../src/game/tags.js'
 // The Minecraft version comes from .env (MC_VERSION), never written here: npm test reads ../.env
 const MC_VERSION = process.env.MC_VERSION
 if (!MC_VERSION) throw new Error('MC_VERSION is missing: run the tests with npm test (it reads ../.env)')
@@ -30,7 +30,7 @@ class Point {
     equals(p) { return this.x === p.x && this.y === p.y && this.z === p.z }
 }
 
-// The block tags the server sends at login (src/tags.js), as read from Paper 1.21.11 on 2026-10-21.
+// The block tags the server sends at login (src/game/tags.js), as read from Paper 1.21.11 on 2026-10-21.
 // Beds, doors and fence gates: every block with that suffix (same lists as the server's).
 const names = Object.keys(registry.blocksByName)
 const TAGS = {
@@ -67,6 +67,10 @@ const TAGS_PACKET = {
         tags: Object.entries(ITEM_TAGS).map(([name, list]) => ({
             tagName: `minecraft:${name}`, entries: list.map((n) => registry.itemsByName[n].id),
         })),
+    }, {
+        // Fluid tags: entries are ids of the fluid registry (flowing_water 1, water 2, flowing_lava 3, lava 4)
+        tagType: 'minecraft:fluid',
+        tags: [{ tagName: 'minecraft:lava', entries: [4, 3] }, { tagName: 'minecraft:water', entries: [2, 1] }],
     }],
 }
 

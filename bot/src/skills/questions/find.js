@@ -1,12 +1,12 @@
-import { perceivesBlock, perceivesEntity, perception } from "../perception.js";
-import { isHostile } from "../state.js";
-import { findBlockTag } from "../tags.js";
-import { round1 } from "./utils.js";
+import { perceivesBlock, perceivesEntity, perception } from "../../observation/perception.js";
+import { isHostile } from "../../observation/state.js";
+import { findBlockTag } from "../../game/tags.js";
+import { round1 } from "../utils.js";
 
 // Question (changes nothing in the world): where are the blocks or entities of a given type?
 // target: a block name ("oak_log"), a game group of blocks ("#logs" = any log: the game's tags,
-// src/tags.js), an entity name ("cow") or "hostile" (every monster).
-// Only what the bot perceives (src/perception.js: by default what is in line of sight, not through
+// src/game/tags.js), an entity name ("cow") or "hostile" (every monster).
+// Only what the bot perceives (src/observation/perception.js: by default what is in line of sight, not through
 // walls), in the loaded chunks around it. 1 to 50 results, up to 64 blocks away.
 const MAX_SIGHT_CHECKS = 300; // blocks checked for line of sight, nearest first
 async function find(bot, { target, count = 5, max_distance = 64 } = {}) {

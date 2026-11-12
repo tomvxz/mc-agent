@@ -2,19 +2,19 @@
 // The body decides nothing: it reports its state, describes its skills and runs what it is asked to.
 //   GET  /state    -> observe(bot)
 //   GET  /skills   -> the skills shown to the LLM (src/skills/catalogue.js); /skills?all=1 -> all of them
-//   GET  /run      -> the current run: run_id, purpose, data_dir, versions... (src/run.js)
+//   GET  /run      -> the current run: run_id, purpose, data_dir, versions... (src/journal/run.js)
 //   POST /execute  -> { name, args, source, episode_id, turn }: runs ONE skill (logged)
-//   POST /setup    -> { x, z, inventory, perception?, count_blocks? }: puts the bot in a starting situation for a bench (src/setup.js;
+//   POST /setup    -> { x, z, inventory, perception?, count_blocks? }: puts the bot in a starting situation for a bench (src/api/setup.js;
 //                     server commands, not a skill, not logged)
 // Uses Node's built-in http module: no dependency.
 
 import http from "node:http";
-import execute from "./execute.js";
-import { currentRun } from "./run.js";
+import execute from "../execution/execute.js";
+import { currentRun } from "../journal/run.js";
 import { setupPlace } from "./setup.js";
-import { findBlockTag } from "./tags.js";
-import { CATALOGUE, COMMON_REASONS, SHOWN_TO_LLM } from "./skills/catalogue.js";
-import { observe } from "./state.js";
+import { findBlockTag } from "../game/tags.js";
+import { CATALOGUE, COMMON_REASONS, SHOWN_TO_LLM } from "../skills/catalogue.js";
+import { observe } from "../observation/state.js";
 
 const MAX_BODY_SIZE = 100 * 1024; // larger request bodies are rejected
 

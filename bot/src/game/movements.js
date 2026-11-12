@@ -1,5 +1,5 @@
 import mineflayerPathfinder from "mineflayer-pathfinder";
-import { isHostile } from "./state.js";
+import { isHostile } from "../observation/state.js";
 import { blockTag } from "./tags.js";
 const { Movements } = mineflayerPathfinder;
 

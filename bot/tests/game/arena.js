@@ -5,8 +5,8 @@
 // - The bot stands on the stone floor, at y=202, in the center (1000, 1000).
 
 import { sleep, waitUntil } from "../../src/skills/utils.js";
-// Commands go through src/commands.js (runCommand)
-import { runCommand } from "../../src/commands.js";
+// Commands go through src/game/commands.js (runCommand)
+import { runCommand } from "../../src/game/commands.js";
 
 const MIN = { x: 977, y: 200, z: 977 };
 const MAX = { x: 1023, y: 213, z: 1023 };

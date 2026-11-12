@@ -1,6 +1,6 @@
 import assert from "node:assert";
 import test from "node:test";
-import { getMovements } from "../../src/movements.js";
+import { getMovements } from "../../src/game/movements.js";
 import { fakeBot, Point } from "./fakeBot.js";
 
 test("the step cost accepts the placeholder of an unloaded cell (no position)", () => {

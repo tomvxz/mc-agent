@@ -8,7 +8,8 @@ branché sur le VRAI jeu via Mineflayer. Projet d'apprentissage : l'utilisateur 
   latent, stabilité des compétences, étapes A à J) : `docs/architecture.md`. S'y référer avant de concevoir
   un nouveau composant, et la tenir à jour quand une décision change.
 - `server/` : serveur Paper 1.21.11 local (online-mode=false). Le bot est op.
-- `scripts/` (versionné ; `server/` est ignoré par git) : `server_start.sh` (en arrière-plan, attend « Done »,
+- `scripts/` (versionné ; `server/` est ignoré par git) : `start_bot.sh [mode]` (le bot depuis la racine, où
+  qu'on l'appelle), `server_start.sh` (en arrière-plan, attend « Done »,
   console dans `server/logs/console.out`), `server_stop.sh` (SIGTERM : Paper sauvegarde puis s'arrête),
   `use_world.sh <graine> [--fresh]` (prochain démarrage sur `worlds/<graine>`, réutilisé s'il existe ; `--fresh`
   le régénère), `use_world.sh --remove <graine>` / `--list` (jamais le monde courant, jamais un monde gardé :
@@ -21,17 +22,20 @@ branché sur le VRAI jeu via Mineflayer. Projet d'apprentissage : l'utilisateur 
   (les imports nommés `import { goals } from ...` échouent).
   - `bot.js` : crée le bot ; modes `node --env-file=../.env bot.js serve` (API pour le cerveau),
     `suite <compétence|all> [N]` (arène), `field [N] [graine] [indice]` (banc terrain)
-  - `src/api.js` : l'API HTTP (`GET /state`, `GET /skills`, `GET /run`, `POST /execute`, `POST /setup`)
-  - `src/setup.js` : mise en place d'un banc (lieu, inventaire, jour) ; pas une compétence, non journalisée
-  - `src/execute.js` : exécute une compétence et écrit sa ligne de journal (`src/logger.js`, `src/run.js` : où et quel run)
-  - `src/runSkill.js` : enveloppe (timeout, capture d'erreurs, durée) ; `src/cancel.js` : une compétence arrêtée ne peut plus agir
-  - `src/skills/` : une compétence par fichier, regroupées dans `index.js` (`utils.js` = fonctions partagées,
-    `catalogue.js` = ce que lit le LLM ; `SHOWN_TO_LLM` = les compétences qui lui sont montrées pour l'instant)
-  - `src/movements.js` : réglages du pathfinder (déplacements débrouillards + instincts), `src/fixes.js` : correctifs de bugs Mineflayer
-  - `src/state.js` : `observe(bot)` = LA définition unique de l'état (pas de pixels), utilisée par l'API et le journal
-  - `src/trace.js` : ce qui se passe pendant une compétence (touches, trajectoire, actions, blocs, entités, événements)
-  - `src/commands.js` : `runCommand`, envoyer une commande serveur
-  - `src/tags.js` : les groupes de blocs DU JEU (tags envoyés par le serveur : replaceable, leaves, beds...)
+  - `src/api/api.js` : l'API HTTP (`GET /state`, `GET /skills`, `GET /run`, `POST /execute`, `POST /setup`)
+  - `src/api/setup.js` : mise en place d'un banc (lieu, inventaire, jour) ; pas une compétence, non journalisée
+  - `src/execution/execute.js` : exécute une compétence et écrit sa ligne de journal (`src/journal/logger.js`, `src/journal/run.js` : où et quel run)
+  - `src/execution/runSkill.js` : enveloppe (timeout, capture d'erreurs, durée) ; `src/execution/cancel.js` : une compétence arrêtée ne peut plus agir
+  - `src/` rangé par rôle (12/11/2026) : `api/`, `execution/`, `journal/`, `observation/`, `game/`, `skills/`.
+  - `src/skills/` : une compétence par fichier, rangées en `actions/`, `questions/`, `shortcuts/`, `low_level/`,
+    regroupées dans `index.js` (`utils.js` = fonctions partagées, `catalogue.js` = ce que lit le LLM ;
+    `SHOWN_TO_LLM` = les compétences qui lui sont montrées pour l'instant). Une nouvelle compétence va dans le
+    dossier de sa famille (le lot 2 : `actions/`).
+  - `src/game/movements.js` : réglages du pathfinder (déplacements débrouillards + instincts), `src/game/fixes.js` : correctifs de bugs Mineflayer
+  - `src/observation/state.js` : `observe(bot)` = LA définition unique de l'état (pas de pixels), utilisée par l'API et le journal
+  - `src/journal/trace.js` : ce qui se passe pendant une compétence (touches, trajectoire, actions, blocs, entités, événements)
+  - `src/game/commands.js` : `runCommand`, envoyer une commande serveur
+  - `src/game/tags.js` : les groupes de blocs DU JEU (tags envoyés par le serveur : replaceable, leaves, beds...)
   - `tests/unit/` (`npm test`, faux bot, sans serveur), `tests/game/` (arène reproductible, taux de réussite),
     `tests/field/` (lieux naturels tirés au hasard : taux de réussite ET répartition des raisons d'échec)
 - `data/` (ignoré par git, format : `docs/journal.md`) : `runs.jsonl`, `transitions.jsonl`, `episodes.jsonl`.
@@ -68,11 +72,11 @@ branché sur le VRAI jeu via Mineflayer. Projet d'apprentissage : l'utilisateur 
 - Pas de numéros de version écrits à la main (ni par compétence, ni pour le catalogue) : le commit git identifie le code.
   Une collecte (`MC_DATA_PURPOSE=collection`) refuse de démarrer si le code n'est pas commité.
 - Ne jamais accélérer le serveur (`/tick rate`) pour collecter : Mineflayer reste en temps réel, les données seraient faussées.
-- Commandes serveur envoyées par notre code : toujours via `src/commands.js` (`runCommand`).
+- Commandes serveur envoyées par notre code : toujours via `src/game/commands.js` (`runCommand`).
 - Format du journal LIBRE tant que rien n'est collecté (les données de dev sont jetables) ; il sera GELÉ au
   premier run de collecte (`MC_DATA_PURPOSE=collection`). Chaque changement = nouvelle `schema_version`.
 - Les compétences appelées À L'INTÉRIEUR d'une compétence (étapes d'un raccourci) ont leur propre ligne,
-  reliée par `parent_seq` (`src/steps.js`), sans trace (c'est une tranche de la trace du haut).
+  reliée par `parent_seq` (`src/execution/steps.js`), sans trace (c'est une tranche de la trace du haut).
 - Ne pas stocker ce qui se recalcule exactement à partir du journal (liste dans `docs/journal.md`).
 
 ## Philosophie des compétences (décision de conception)
@@ -124,7 +128,7 @@ branché sur le VRAI jeu via Mineflayer. Projet d'apprentissage : l'utilisateur 
   (ex. `not_collected` : pas « les feuilles », mais une cible qui BOUGE -> viser où l'objet atterrit).
   Seules exceptions : quelques instincts de sécurité (lave, chutes).
 - Les FAITS du jeu viennent du jeu, pas de listes écrites par nous : données de Mineflayer (dureté, outils,
-  recettes) et tags du serveur (`src/tags.js` : ce qui est remplaçable, les feuilles, les lits...). Nos listes
+  recettes) et tags du serveur (`src/game/tags.js` : ce qui est remplaçable, les feuilles, les lits...). Nos listes
   ne gardent que nos CHOIX (ce qu'on protège, ce qu'on évite, les blocs jetables, ce qu'on signale au LLM).
   Un tag n'est pas toujours toute la règle : la neige est « remplaçable » mais le jeu n'en remplace qu'UNE
   couche ; on essaie, et la vérification après coup le dit (cas d'arène).
@@ -226,7 +230,10 @@ branché sur le VRAI jeu via Mineflayer. Projet d'apprentissage : l'utilisateur 
 ## Feuille de route (mise à jour)
 5. Compétences : primitives générales d'abord, puis raccourcis, puis questions et exploration.
    [fait : move_to, break_block, pick_up, place_block, craft, eat, find, scan, explore, collect_block, mine ;
-    lot 2 : attack, equip, use_item, container, smelt, wait ; sous terre : dig, strip_mine]
+    questions : recipe, craftable ; sous terre : dig, strip_mine ; bas niveau : walk, look, press.
+    PAS ENCORE ÉCRIT (vérifié dans le code et l'historique git le 12/11/2026) : le lot 2 attack, equip,
+    use_item, container, smelt, wait. Sans lui, le contrôle d'expressivité échoue (tuer et cuire une vache,
+    ranger dans un coffre) et les données collectées n'auront aucune de ces actions.]
 6. Agent LLM baseline avec le champ `missing_capability` ; mesurer où il échoue.
    Le LLM prend directement les sorties de Node (pas encore de world model) : c'est la baseline de l'étape 8.
    [en cours : banc d'épisodes, condition de but ; tâches plus longues à ajouter (crafting_table, pioche)]
@@ -277,7 +284,7 @@ pas des engagements ; en ajouter, en retirer selon ce que montrent les données.
   comparer), corriger par fréquence et par cause racine, relancer la même graine. L'arène ne sert qu'aux régressions.
   « Robuste » = borné en temps, raison d'échec honnête, ~90 % sur le banc terrain (pas 100 %).
 - Cause racine trouvée : la physique de Mineflayer collait le bot exactement contre les murs, Paper le renvoyait en
-  arrière à chaque tick (bot figé) -> `fixWallContact` (src/fixes.js). Banc terrain graine 1 : move_to 11 % -> 100 %,
+  arrière à chaque tick (bot figé) -> `fixWallContact` (src/game/fixes.js). Banc terrain graine 1 : move_to 11 % -> 100 %,
   explore 5 % -> 100 %, mine 67 % -> 100 % (19 lieux seulement).
 - Conception à 3 niveaux sur les mêmes primitives : réflexes dans Node (à l'intérieur d'une compétence, au tick),
   tactique après un échec (d'abord des RÈGLES écrites dans `brain/recovery.py`, suites de primitives sous forme de
@@ -296,6 +303,20 @@ pas des engagements ; en ajouter, en retirer selon ce que montrent les données.
   par défaut, ramassage qui vise où l'objet ATTERRIT (`landingSpot` : cause de `not_collected`), "Digging aborted"
   en `dig_failed`, `cleared` remonté par collect_block et mine. Arène : move_to, break_block, collect_block,
   pick_up, mine passent ; `not_collected` n'a plus de cas d'arène (aucun montage déterministe trouvé).
+- Revue du JS (12/11/2026) : code sain, 99 tests unitaires OK. Corrigés : défaut `distance` de `dig` absent
+  du catalogue (`args_resolved` faux ; un test compare maintenant les défauts du code et du catalogue),
+  `settle_ticks` sur chaque ligne (6 en haut, 0 pour une étape : décidé, pas d'attente entre primitives).
+  Le format v10 n'a encore JAMAIS tourné en jeu : passe d'arène avant de commiter pour la collecte (taille
+  des lignes avec la grille de rayon 16, temps d'`observe`). Restent : `craft` trouve la table à travers les
+  murs (`findBlock`), deux définitions de « vu » (raycast de Mineflayer dans `break_block`, DDA de `perception.js`).
+  Arène v10 (12/11/2026) : tout passe sauf 3 bugs, corrigés (tests unitaires OK, ARÈNE À RELANCER) :
+  `dig` tombait d'un bord (contrôle toutes les 50 ms, ticks de physique groupés quand Node est occupé :
+  contrôle à chaque tick, `stepInto`) ; `mine` comptait « partial » un bloc cassé dont l'objet est ramassé
+  plus tard (`not_picked_up`) ; `craft` 2x2 après une table : la resynchronisation de l'inventaire
+  s'arrêtait sur une ANCIENNE réponse (~1 ms au lieu d'un tick) -> `resyncWindow` attend 150 ms de silence,
+  avant et après chaque fabrication (cause probable, cas d'arène « planks x8 right after a craft at a table »).
+  Ticks groupés : 5,9 % (v9) -> 15,2 % (v10, grille de rayon 16) : à faire, construire la grille en lisant les
+  chunks directement (comme `perception.js`).
 - Prochaines étapes, dans l'ordre :
   1. Préparer la collecte pour le world model (étape 7) : commit, `MC_DATA_PURPOSE=collection`, bancs lancés en
      série (qwen2.5:14b pour des épisodes réussis variés, petits modèles pour des échecs), puis premières têtes.
@@ -317,7 +338,8 @@ pas des engagements ; en ajouter, en retirer selon ce que montrent les données.
   la réponse voyait à travers les murs ; pour découvrir, creuser vers lui) ; liquides = tags de fluides du
   serveur (minecraft-data dit l'eau « cassable »), plus `bubble_column` (de l'eau pour le jeu, non dit au client) ; fin du temps limite unique de 60 s (voir Conventions : budget, progrès, alertes) ; `mine`
   plafonné par son budget (marche jusqu'au plus proche + ~5 s par bloc : ~18 blocs par appel). À décider : `explore` (max 256 -> 64 ?).
-  Écrits le 23/10/2026 (tests unitaires OK, ARÈNE PAS ENCORE LANCÉE, pas encore montrés au LLM) :
+  Écrits le 23/10/2026 (tests unitaires OK, arène lancée le 23/10 : dig 16 ok + cas limites danger_ahead,
+  opening, no_tool ; strip_mine 36 ok ; pas encore montrés au LLM) :
   `dig(direction, distance, slope level|up|down, stop_at)` (tunnel 1x2, escaliers, arrêt quand un bloc de la
   liste APPARAÎT), `strip_mine(direction, blocks, max_seconds?, until?, max_distance)` (dig + collect_block :
   ramasse tout ce qui est dans la liste près du tunnel), `max_seconds` pour toutes les compétences (`runSkill`) :
@@ -333,7 +355,7 @@ pas des engagements ; en ajouter, en retirer selon ce que montrent les données.
   avec de l'épicéa en poche). Avec un contexte de 4096 (Ollama relancé sans OLLAMA_CONTEXT_LENGTH), les
   épisodes ne valent rien : vérifier `context_length`.
 - Corrigé : plusieurs fabrications d'un coup dans la grille 2x2 faussaient l'inventaire vu par le bot (Mineflayer
-  ne resynchronise qu'après une table) -> `fixCraftSync` (src/fixes.js), cas d'arène « planks x8 » qui passe ;
+  ne resynchronise qu'après une table) -> `fixCraftSync` (src/game/fixes.js), cas d'arène « planks x8 » qui passe ;
   les alertes comparent à la vérification PRÉCÉDENTE (régénération puis coup, monstre qui revient) ; le bot
   s'arrête s'il perd le serveur (vu : Mac en veille, écran rabattu ; lancer les longs runs sur secteur avec
   `caffeinate -s`, écran ouvert).
@@ -355,7 +377,7 @@ pas des engagements ; en ajouter, en retirer selon ce que montrent les données.
   L'échec : un plan écrit d'avance autour du chêne, rejoué 10 fois avec `spruce_log` en vue à 4 blocs (a priori
   du modèle, pas un manque d'information : cas pour une tactique ou le world model). Le 14B enchaîne
   maintenant de longs plans (jusqu'à `goal_reached`) : jugé positif, la boucle arrête au premier échec. Hostile = catégorie du jeu « Hostile mobs ».
-- Perception branchée (`src/perception.js`, `MC_PERCEPTION`, `POST /setup {perception}`) : `find`, `mine`
+- Perception branchée (`src/observation/perception.js`, `MC_PERCEPTION`, `POST /setup {perception}`) : `find`, `mine`
   (via find), `scan` et la vue du LLM ne voient que la ligne de vue par défaut ; `bench --xray`,
   `--compare sight`. Pas encore : la mémoire de ce qui a été vu ; le pathfinder planifie toujours avec tout
   ce que le client sait (mécanique du corps) ; l'alerte `hostile_near` compte aussi un monstre derrière un

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { blockState, observe, packBits } from "../../src/state.js";
+import { blockState, observe, packBits } from "../../src/observation/state.js";
 import { fakeBot, Point } from "./fakeBot.js";
 
 test("state: a block in the game's notation, with its state sorted", () => {
@@ -47,8 +47,8 @@ function wallScene() {
 }
 
 test("perception: find only sees what is in line of sight; with \"all\", everything", async () => {
-    const { setPerception } = await import("../../src/perception.js");
-    const { default: find } = await import("../../src/skills/find.js");
+    const { setPerception } = await import("../../src/observation/perception.js");
+    const { default: find } = await import("../../src/skills/questions/find.js");
     const sight = await find(wallScene(), { target: "spruce_log", count: 10 });
     assert.ok(sight.details.matches.every((m) => m.x === 9), JSON.stringify(sight.details.matches));
     assert.ok(sight.details.matches.some((m) => m.y >= 102)); // the top of the trunk, above the wall
@@ -62,24 +62,29 @@ test("perception: find only sees what is in line of sight; with \"all\", everyth
     assert.throws(() => setPerception("xray"), /unknown perception/);
 });
 
-// Is the grid cell at (x, y, z) marked visible (decodes the mask as docs/journal.md says)
-function cellVisible(grid, x, y, z) {
+// The index of the grid cell at (x, y, z), as docs/journal.md says
+function cellIndex(grid, x, y, z) {
     const R = grid.radius;
     const S = 2 * R + 1;
     const [ox, oy, oz] = grid.origin;
-    const i = (y - oy + R) * S * S + (z - oz + R) * S + (x - ox + R);
+    return (y - oy + R) * S * S + (z - oz + R) * S + (x - ox + R);
+}
+
+// Is the grid cell at (x, y, z) marked visible (decodes the mask as docs/journal.md says)
+function cellVisible(grid, x, y, z) {
+    const i = cellIndex(grid, x, y, z);
     return (Buffer.from(grid.visible, "base64")[i >> 3] & (1 << (i & 7))) !== 0;
 }
 
 test("state: in_sight lists every kind of block seen, the grid marks the hidden cells", async () => {
-    const { setPerception } = await import("../../src/perception.js");
+    const { setPerception } = await import("../../src/observation/perception.js");
     const s = observe(wallScene());
     assert.equal(s.in_sight.spruce_log.nearest[0], 8.5); // the trunk at x=9, not the hidden log at x=5
     assert.ok(s.in_sight.stone.count >= 1); // the wall itself is seen: no list of kinds
     // The grid holds the hidden log (everything known) but marks it not visible; the wall's face and
     // the air between are visible, and so is the top of the trunk
     const g = s.blocks;
-    assert.equal(g.palette[g.cells[(100 - g.origin[1] + 8) * 289 + (0 - g.origin[2] + 8) * 17 + (5 - g.origin[0] + 8)]], "spruce_log");
+    assert.equal(g.palette[g.cells[cellIndex(g, 5, 100, 0)]], "spruce_log");
     assert.deepEqual(
         [cellVisible(g, 5, 100, 0), cellVisible(g, 3, 101, 0), cellVisible(g, 2, 101, 0), cellVisible(g, 9, 104, 0)],
         [false, true, true, true],

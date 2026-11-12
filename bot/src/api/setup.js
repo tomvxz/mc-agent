@@ -3,14 +3,14 @@
 // logged as a transition (the first state of what follows shows the result).
 // Used by the field bench (tests/field) and by POST /setup (the episode bench, brain/bench.py).
 
-import { runCommand } from "./commands.js";
-import { setPerception } from "./perception.js";
-import { findBlockTag } from "./tags.js";
-import { sleep, waitUntil } from "./skills/utils.js";
+import { runCommand } from "../game/commands.js";
+import { setPerception } from "../observation/perception.js";
+import { findBlockTag } from "../game/tags.js";
+import { sleep, waitUntil } from "../skills/utils.js";
 
 // Teleport the bot onto the ground at column (x, z), then set its inventory to exactly `inventory`
 // ({ item: count }). Returns { success, reason, details }.
-// perception (optional): "sight" or "all", for the skills that follow (src/perception.js).
+// perception (optional): "sight" or "all", for the skills that follow (src/observation/perception.js).
 // count_blocks (optional): block names or game groups ("#logs") to count within 32 blocks, ALL that the
 // client knows (a description of the place for the bench, not what the bot perceives).
 async function setupPlace(bot, { x, z, inventory = {}, perception, count_blocks = [] }) {

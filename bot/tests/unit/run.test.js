@@ -3,8 +3,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { fixDifficulty } from "../../src/fixes.js";
-import { collectionProblem, currentRun, dataDirFor, newRunId, startRun } from "../../src/run.js";
+import { fixDifficulty } from "../../src/game/fixes.js";
+import { collectionProblem, currentRun, dataDirFor, newRunId, startRun } from "../../src/journal/run.js";
 import { fakeBot, MC_VERSION } from "./fakeBot.js";
 
 // Everything goes to a temporary data folder

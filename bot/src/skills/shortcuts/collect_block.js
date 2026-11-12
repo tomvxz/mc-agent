@@ -1,9 +1,9 @@
 // Shortcut: break the block at a position AND pick up what drops = break_block + pick_up.
 // The two are almost always wanted together: one call saves the LLM a step.
-import break_block from "./break_block.js";
-import pick_up from "./pick_up.js";
-import { step } from "../steps.js";
-import { gainedSince, inventoryCounts } from "./utils.js";
+import break_block from "../actions/break_block.js";
+import pick_up from "../actions/pick_up.js";
+import { step } from "../../execution/steps.js";
+import { gainedSince, inventoryCounts } from "../utils.js";
 
 const PICK_UP_SECONDS = 3; // walking onto the drops, usually next to the block
 

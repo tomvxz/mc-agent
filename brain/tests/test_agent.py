@@ -107,16 +107,16 @@ def test_missing_capability_is_logged(tmp_path):
     assert turns[0]["missing_capability"] == "open a door"
 
 
-def test_the_logged_messages_rebuild_the_exact_conversation(tmp_path):
+def test_each_turn_logs_the_exact_conversation(tmp_path):
     body = FakeBody(lambda name, args: ok())
     llm = FakeLLM([plan(("mine", {"block": "oak_log"})), plan(("craft", {"item": "stick"})), plan(done=True)])
     run_episode("sticks", body.client(), llm, episodes_file=tmp_path / "e.jsonl")
     log = events(tmp_path / "e.jsonl")
     start, turns = log[0], [e for e in log if e["type"] == "llm_turn"]
-    rebuilt = [{"role": "system", "content": start["system_prompt"]}]
+    assert len(turns) == len(llm.calls) == 3
     for n, turn in enumerate(turns):
-        rebuilt += turn["new_messages"]
-        assert rebuilt == llm.calls[n]  # exactly what the LLM received at turn n
+        assert turn["messages"] == llm.calls[n]  # exactly what the LLM received at turn n
+        assert turn["messages"][0] == {"role": "system", "content": start["system_prompt"]}
 
 
 def test_an_llm_error_ends_the_episode(tmp_path):

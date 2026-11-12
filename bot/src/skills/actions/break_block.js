@@ -7,11 +7,11 @@ import {
     makeVec3,
     movementFailureReason,
     walkSeconds,
-} from "./utils.js";
-import { inBlockTag } from "../tags.js";
+} from "../utils.js";
+import { perceivesBlock } from "../../observation/perception.js";
+import { inBlockTag, isFluid } from "../../game/tags.js";
 const { goals } = mineflayerPathfinder;
 
-const LIQUIDS = ["water", "lava"]; // with the game's tag minecraft:air: nothing to break there
 const QUICK_HARDNESS = 0.25; // breaks almost instantly: leaves 0.2, tall grass 0, snow 0.1, vines 0.2
 const MAX_CLEARED = 6; // at most this many blocks broken just to see the target
 // Look at the faces of the target turned towards the bot (at most 3, like Mineflayer's
@@ -111,8 +111,8 @@ async function getInView(bot, target, ready) {
     return { cleared, moveError };
 }
 
-// Break the block at a position, and only that (to also get the items: collect_block). The bot
-// walks to a place where it sees the block; if there is none, it breaks leaves or tall grass hiding it.
+// Break the block at a position, and only that (to also get the items: collect_block). The block must
+// be seen from where the bot is (not_seen otherwise). The bot walks to a place where it sees a face; if there is none, it breaks leaves or tall grass hiding it.
 // require_tool (default true): refuse a block that drops nothing without the right tool (stone without a
 // pickaxe); false = break it anyway, like a player clearing a way: slower, and nothing drops (no_drop).
 async function break_block(bot, { x, y, z, require_tool = true } = {}) {
@@ -126,7 +126,11 @@ async function break_block(bot, { x, y, z, require_tool = true } = {}) {
     const block = bot.blockAt(target);
     if (!block)
         return { success: false, reason: "not_loaded", details: { position } };
-    if (inBlockTag(bot, "air", block) || LIQUIDS.includes(block.name))
+    // Not seen from here (behind a wall): nothing is said about it, not even what it is, or the answer
+    // would see through walls. To uncover hidden blocks, dig towards them (each block broken shows the next).
+    if (!perceivesBlock(bot, target))
+        return { success: false, reason: "not_seen", details: { position } };
+    if (inBlockTag(bot, "air", block) || isFluid(bot, block)) // the game's air and fluids
         return {
             success: false,
             reason: "nothing_to_break",

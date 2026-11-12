@@ -1,12 +1,12 @@
 import mineflayer from "mineflayer";
 import mineflayerPathfinder from "mineflayer-pathfinder";
-import { startApi } from "./src/api.js";
-import { runCommand } from "./src/commands.js";
-import { fixDifficulty, fixStateId, fixWallContact } from "./src/fixes.js";
-import { getMovements } from "./src/movements.js";
-import { startRun, watchLogin } from "./src/run.js";
-import { trackDeaths, trackFall } from "./src/state.js";
-import { recordTags } from "./src/tags.js";
+import { startApi } from "./src/api/api.js";
+import { runCommand } from "./src/game/commands.js";
+import { fixCraftSync, fixDifficulty, fixStateId, fixWallContact } from "./src/game/fixes.js";
+import { getMovements } from "./src/game/movements.js";
+import { startRun, watchLogin } from "./src/journal/run.js";
+import { trackDeaths, trackFall } from "./src/observation/state.js";
+import { recordTags } from "./src/game/tags.js";
 const { pathfinder } = mineflayerPathfinder;
 
 const host = process.env.MC_HOST || "localhost";
@@ -17,22 +17,31 @@ const bot = mineflayer.createBot({
     username: process.env.MC_USERNAME || "Agent",
     version: process.env.MC_VERSION,
 });
-recordTags(bot); // the game's block tags (src/tags.js): sent once at login, listen before it arrives
+recordTags(bot); // the game's block tags (src/game/tags.js): sent once at login, listen before it arrives
 bot.loadPlugin(pathfinder);
-fixStateId(bot); // see src/fixes.js
+fixStateId(bot); // see src/game/fixes.js
 fixDifficulty(bot);
-fixWallContact(); // see src/fixes.js: the bot froze against every wall
+fixWallContact(); // see src/game/fixes.js: the bot froze against every wall
 watchLogin(bot); // view and simulation distances, for run_start
 trackDeaths(bot); // deaths count, part of the state
 trackFall(bot); // fall distance, part of the state
 
 bot.on("error", (err) => console.error("[error]", err.message));
 bot.on("kicked", (reason) => console.error("[kicked]", reason));
-bot.on("end", (reason) => console.log("[disconnected]", reason));
+bot.on("end", (reason) => {
+    console.log("[disconnected]", reason);
+    // Lost the server in the middle of a suite or a bench (seen: the Mac went to sleep, lid closed): stop
+    // with an error instead of staying alive with nothing to do. Our own bot.quit() ends normally.
+    if (reason !== "disconnect.quitting") {
+        console.error("[disconnected] the connection to the server was lost: stopping");
+        process.exit(1);
+    }
+});
 
 bot.once("spawn", async () => {
-    bot.pathfinder.setMovements(getMovements(bot)); // resourceful movement, see src/movements.js
-    // One run per launch: run_id, data folder (dev or collection), versions, world seed (src/run.js)
+    bot.pathfinder.setMovements(getMovements(bot)); // resourceful movement, see src/game/movements.js
+    fixCraftSync(bot); // see src/game/fixes.js: several crafts in the 2x2 grid left the inventory view wrong
+    // One run per launch: run_id, data folder (dev or collection), versions, world seed (src/journal/run.js)
     try {
         const run = await startRun(bot, { host, port, command: runCommand });
         console.log(`[run] ${run.run_id} (${run.purpose}) -> ${run.data_dir}`);
@@ -45,7 +54,7 @@ bot.once("spawn", async () => {
     const test = process.argv[2];
 
     if (test === "serve") {
-        // API mode: the bot stays connected and waits for orders from the brain (see src/api.js)
+        // API mode: the bot stays connected and waits for orders from the brain (see src/api/api.js)
         // node --env-file=../.env bot.js serve
         const apiPort = parseInt(process.env.API_PORT || "3000", 10);
         await startApi(bot, { port: apiPort });

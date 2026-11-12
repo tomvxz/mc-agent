@@ -19,8 +19,8 @@ const SHOWN_TO_LLM = [
 // Reasons possible for EVERY skill (added by runSkill and execute)
 const COMMON_REASONS = {
     timeout:
-        "the skill took much longer than expected and was stopped (details.seconds); details.inventory_change: " +
-        "what it had gathered or used before being stopped",
+        "the skill took much longer than expected, or than the max_seconds you gave (details.limit), and was " +
+        "stopped (details.seconds); details.inventory_change: what it had gathered or used before being stopped",
     no_progress:
         "the skill was stopped: nothing moved, was dug or changed in the inventory for 15 s; " +
         "details.inventory_change: what it had done before",
@@ -28,8 +28,8 @@ const COMMON_REASONS = {
         "the skill was stopped because the bot was hurt or a monster came close (details.trigger): " +
         "decide what to do first; details.inventory_change: what it had done before",
     too_long:
-        "refused before starting: it would take too long (details.estimated_seconds, more than details.max_seconds), " +
-        "e.g. too many blocks at once: split it into several calls",
+        "refused before starting: it would take too long (details.estimated_seconds or the requested max_seconds, " +
+        "more than details.max_seconds), e.g. too many blocks at once: split it into several calls",
     exception: "unexpected error in the code (details.error)",
     bad_result: "the skill returned a malformed result (bug)",
     unknown_skill: "no skill has this name",
@@ -108,6 +108,7 @@ const CATALOGUE = {
         reasons: {
             invalid_args: "missing coordinates or not integers, or require_tool not true/false",
             not_loaded: "this area is not loaded (too far)",
+            not_seen: "this block is not in sight from here (hidden): nothing is known about it",
             nothing_to_break: "there is only air or a liquid at this position",
             unbreakable: "unbreakable block (bedrock, barrier)",
             no_tool:
@@ -399,6 +400,7 @@ const CATALOGUE = {
         reasons: {
             invalid_args: "missing coordinates or not integers",
             not_loaded: "this area is not loaded (too far)",
+            not_seen: "this block is not in sight from here (hidden): nothing is known about it",
             nothing_to_break: "there is only air or a liquid at this position",
             unbreakable: "unbreakable block (bedrock, barrier)",
             no_tool:
@@ -433,6 +435,84 @@ const CATALOGUE = {
             not_loaded: "area not loaded",
             dig_failed: "a block did not break",
             not_collected: "blocks broken but items not picked up",
+        },
+    },
+    dig: {
+        kind: "primitive",
+        description:
+            "Dig a straight tunnel (1 wide, 2 high) and walk into it, block after block: the way to uncover what is " +
+            "hidden underground (each block broken shows the next ones). slope 'up' or 'down' digs a staircase. " +
+            "With stop_at, it stops as soon as one of these blocks comes into sight (details.found: where). " +
+            "It never breaks a block next to lava or water, and stops where the tunnel opens onto a cave.",
+        parameters: {
+            type: "object",
+            properties: {
+                direction: { type: "string", enum: ["north", "south", "east", "west"], description: "direction of the tunnel" },
+                distance: { ...integer("blocks to dig forward (64 at most)"), default: 8 },
+                slope: {
+                    type: "string",
+                    enum: ["level", "up", "down"],
+                    description: "level, or a staircase one block up / down per block forward",
+                    default: "level",
+                },
+                stop_at: {
+                    type: "array",
+                    items: { type: "string" },
+                    description: "block names or game groups ('#iron_ores'): stop when one comes into sight",
+                },
+                max_seconds: number("stop digging after this many seconds (a normal end, details.stopped_by 'time')"),
+            },
+            required: ["direction"],
+        },
+        reasons: {
+            invalid_args: "unknown direction or slope, distance not an integer from 1 to 64, or an unknown block in stop_at",
+            danger_ahead: "stopped before breaking a block next to lava or water (details.danger)",
+            opening: "the tunnel opens onto a void or a cave (details.position): nothing to stand on",
+            no_tool: "a block of the tunnel requires a tool missing from the inventory (details.tools)",
+            unbreakable: "an unbreakable block is in the way (bedrock)",
+            blocked: "the bot could not step into the tunnel, or falling gravel kept filling it",
+            not_loaded: "this area is not loaded",
+            dig_failed: "a block did not break",
+        },
+    },
+    strip_mine: {
+        kind: "shortcut",
+        description:
+            "Mine underground: dig a straight tunnel and collect every block of the list that comes into sight " +
+            "near it (veins too), then dig on. Ends after max_seconds, when the inventory has `until`, or at " +
+            "max_distance. Kinds the inventory cannot harvest (no pickaxe good enough) are left out: details.skipped. " +
+            "A tunnel only shows the blocks touching it: dig several parallel tunnels to find more.",
+        parameters: {
+            type: "object",
+            properties: {
+                direction: { type: "string", enum: ["north", "south", "east", "west"], description: "direction of the tunnel" },
+                blocks: {
+                    type: "array",
+                    items: { type: "string" },
+                    description: "the blocks to collect: names or game groups, e.g. ['#iron_ores', '#coal_ores']",
+                },
+                max_seconds: number("stop after this many seconds"),
+                until: {
+                    type: "object",
+                    additionalProperties: { type: "integer" },
+                    description: "stop when the inventory has gained these items, e.g. {\"raw_iron\": 8}",
+                },
+                max_distance: { type: "integer", description: "blocks to dig at most (64 at most)", default: 16 },
+            },
+            required: ["direction", "blocks"],
+        },
+        reasons: {
+            invalid_args: "unknown direction, an unknown block in blocks, an unknown item or bad count in until, " +
+                "an until item that no block of the list drops (details.until_item), or a bad max_distance",
+            partial: "the time or the distance ended before `until` was met (details.collected)",
+            no_tool: "nothing in the list can be harvested with the inventory, or an until item cannot (details.skipped)",
+            danger_ahead: "the tunnel stopped before lava or water (details.danger); what was collected is in details",
+            opening: "the tunnel opened onto a cave (details.position)",
+            unbreakable: "an unbreakable block is in the way",
+            blocked: "the bot could not go on in the tunnel",
+            ...MOVEMENT,
+            not_loaded: "this area is not loaded",
+            dig_failed: "a block did not break",
         },
     },
 };

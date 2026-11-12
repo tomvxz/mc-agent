@@ -75,13 +75,20 @@ def show(
             f"code {start.get('code_version')}, max {start.get('max_turns')} turns"
         )
 
+    previous: list[dict[str, Any]] = []  # the messages of the previous turn
     for event in events:
         if event["type"] == "llm_turn":
             tokens = (event.get("tokens") or {}).get("prompt")
             lines.append("")
             lines.append(f"turn {event['turn']}  [{tokens} tokens, {event.get('latency')} s]")
             if full:
-                for m in event["new_messages"]:
+                # Version 2 logs the whole conversation: show only what is new since the previous turn
+                # (all of it when it does not continue the previous one: the goal definition, a rebuilt view)
+                messages = event.get("messages", event.get("new_messages")) or []
+                new = messages[len(previous):] if messages[: len(previous)] == previous else messages
+                if "messages" in event:
+                    previous = messages
+                for m in new:
                     text = m.get("content") or json.dumps(m.get("tool_calls"))
                     lines.append(f"  | {m['role']}: " + text.replace("\n", "\n  |   "))
             message = (event.get("raw_response") or {}).get("choices", [{}])[0].get("message", {})

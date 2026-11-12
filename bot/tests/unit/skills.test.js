@@ -4,6 +4,7 @@ import assert from "node:assert";
 import test from "node:test";
 import prismarineRecipe from "prismarine-recipe";
 import skills from "../../src/skills/index.js";
+import { stepInto } from "../../src/skills/actions/dig.js";
 import { landingSpot } from "../../src/skills/utils.js";
 import { fakeBot, Point, MC_VERSION } from "./fakeBot.js";
 
@@ -28,6 +29,7 @@ test("the skills of batch 1 (+ pick_up and collect_block, split out of break_blo
     "collect_block",
     "craft",
     "craftable",
+    "dig",
     "eat",
     "explore",
     "find",
@@ -39,6 +41,7 @@ test("the skills of batch 1 (+ pick_up and collect_block, split out of break_blo
     "press",
     "recipe",
     "scan",
+    "strip_mine",
     "walk",
   ]);
 });
@@ -123,6 +126,22 @@ test("break_block: arguments, nothing to break, unbreakable, missing tool", asyn
   const water = fakeBot({ blocks: { "1,100,0": "water" } });
   await expectResult(
     skills.break_block(water, { x: 1, y: 100, z: 0 }),
+    false,
+    "nothing_to_break",
+  );
+  // Behind a wall: refused without saying what it is (the bot would see through walls)
+  const hidden = fakeBot({
+    blocks: { "2,100,0": "stone", "2,101,0": "stone", "3,100,0": "diamond_ore" },
+  });
+  const h = await expectResult(
+    skills.break_block(hidden, { x: 3, y: 100, z: 0 }),
+    false,
+    "not_seen",
+  );
+  assert.deepStrictEqual(h.details, { position: [3, 100, 0] });
+  const bubbles = fakeBot({ blocks: { "1,100,0": "bubble_column" } });
+  await expectResult(
+    skills.break_block(bubbles, { x: 1, y: 100, z: 0 }),
     false,
     "nothing_to_break",
   );
@@ -433,16 +452,19 @@ test("mine: unknown block, invalid count, block absent", async () => {
   );
 });
 
-// A log at 2,100,0 hidden by `hider` at 1,101,0 (the fake line of sight hits it while it is there)
-function hiddenLog(hider) {
-  const blocks = { "2,100,0": "oak_log", "1,101,0": hider };
+// A log at 2,100,0 hidden by `hider` at `at` (the fake line of sight of the dig hits it while it is
+// there). At 1,101,0 a stone hides it from the bot's eyes too (not_seen): `at` elsewhere for a log that
+// is seen from here but whose face is hidden where the bot gets to dig it.
+function hiddenLog(hider, at = "1,101,0") {
+  const blocks = { "2,100,0": "oak_log", [at]: hider };
+  const hiderPosition = new Point(...at.split(",").map(Number));
   const bot = fakeBot({ blocks });
   // The ray must be long enough to reach the log (about 2 blocks away), otherwise it hits nothing
   bot.world = {
     raycast: (from, dir, maxDistance) => {
       if (maxDistance < 2) return null;
-      return blocks["1,101,0"]
-        ? bot.blockAt(new Point(1, 101, 0))
+      return blocks[at]
+        ? bot.blockAt(hiderPosition)
         : bot.blockAt(new Point(2, 100, 0));
     },
   };
@@ -475,8 +497,8 @@ test("break_block: no viewpoint and leaves in the way -> the leaves are broken (
   ]);
 });
 
-test("break_block: a block hidden by stone -> only viewpoints, the stone is never broken", async () => {
-  const { bot, calls } = hiddenLog("stone");
+test("break_block: a block seen, its face hidden by stone where the bot digs -> only viewpoints, the stone is never broken", async () => {
+  const { bot, calls } = hiddenLog("stone", "2,101,0"); // above the log: its side stays in sight
   const r = await expectResult(
     skills.break_block(bot, { x: 2, y: 100, z: 0 }),
     false,
@@ -807,4 +829,114 @@ test("look and press: arguments; press holds the keys then releases them, withou
   await expectResult(skills.press(bot, { keys: ["forward", "sprint"], ticks: 2 }), true, "ok");
   assert.deepStrictEqual(held, ["forward", "sprint"]);
   assert.deepStrictEqual([bot.controlState.forward, bot.controlState.sprint], [false, false]);
+});
+
+test("dig: arguments", async () => {
+  for (const args of [
+    {},
+    { direction: "up" }, // a slope, not a direction
+    { direction: "east", distance: 0 },
+    { direction: "east", distance: 65 },
+    { direction: "east", slope: "diagonal" },
+    { direction: "east", stop_at: "diamond_ore" }, // a list
+    { direction: "east", stop_at: ["not_a_block"] },
+  ])
+    await expectResult(skills.dig(fakeBot(), args), false, "invalid_args");
+});
+
+test("dig: never breaks a block next to a liquid; stops where the tunnel opens onto a void", async () => {
+  // Stone ahead with water behind it: it would flow into the tunnel
+  const wet = fakeBot({ blocks: { "1,100,0": "stone", "2,100,0": "water" } });
+  let broke = false;
+  wet.dig = async () => (broke = true);
+  const r = await expectResult(skills.dig(wet, { direction: "east" }), false, "danger_ahead");
+  assert.deepStrictEqual([r.details.danger, r.details.dug, broke], ["water", 0, false]);
+  // Nothing ahead and nothing under it (the fake world is air): no floor to step on
+  const o = await expectResult(skills.dig(fakeBot(), { direction: "east" }), false, "opening");
+  assert.deepStrictEqual(o.details.position, [1, 99, 0]);
+  // A staircase down looks two blocks under the new step
+  const d = await expectResult(skills.dig(fakeBot(), { direction: "east", slope: "down" }), false, "opening");
+  assert.deepStrictEqual(d.details.position, [1, 98, 0]);
+});
+
+test("dig: stepping into the dug cell stops in it even when physics ticks come in bursts", async () => {
+  // A tiny physics: forward = 0.117 block per tick (walking speed), released = slides and slows down. Ticks
+  // come 3 at a time (Node busy, the physics catching up), like in the arena where the bot fell off an edge:
+  // checking every 50 ms let it pass the cell between two checks.
+  const bot = fakeBot();
+  Object.assign(bot.entity, { onGround: true, velocity: { x: 0, y: 0, z: 0 } });
+  bot.controlState = {};
+  const tick = () => {
+    const v = bot.entity.velocity;
+    v.x = bot.controlState.forward ? 0.117 : v.x * 0.5;
+    if (Math.abs(v.x) < 0.003) v.x = 0;
+    bot.entity.position.x += v.x;
+    bot.emit("physicsTick");
+  };
+  const physics = setInterval(() => { for (let i = 0; i < 3; i++) tick(); }, 15);
+  try {
+    // From the middle of cell x=0 into cell x=1 (east); beyond x=2 would be the void
+    const arrived = await stepInto(bot, { x: 1, y: 100, z: 0 }, [1, 0], false);
+    const x = bot.entity.position.x;
+    assert.ok(arrived, `not arrived, x = ${x}`);
+    assert.ok(x >= 1 && x < 2, `x = ${x}: outside the cell`);
+    assert.deepStrictEqual([bot.controlState.forward, bot.controlState.jump], [false, false]); // keys released
+    assert.strictEqual(bot.listenerCount("physicsTick"), 0); // nothing left listening
+  } finally {
+    clearInterval(physics);
+  }
+});
+
+test("dig: budget = the game's digging time of the cells on the way", () => {
+  const stone = {};
+  for (let x = 1; x <= 4; x++) stone[`${x},100,0`] = stone[`${x},101,0`] = "stone";
+  // The game's digging time (prismarine-block's digTime, absent from the fake blocks): 7.5 s for stone by hand
+  const withDigTime = (bot) => {
+    const blockAt = bot.blockAt;
+    bot.blockAt = (p) => ({ ...blockAt(p), digTime: () => 7500 });
+    bot.pathfinder.bestHarvestTool = () => null;
+    return bot;
+  };
+  const pickaxe = { blocks: stone, inventory: { wooden_pickaxe: 1 } };
+  const withStone = skills.dig.budget(withDigTime(fakeBot(pickaxe)), { direction: "east", distance: 4 });
+  const empty = skills.dig.budget(withDigTime(fakeBot()), { direction: "east", distance: 4 });
+  assert.ok(withStone >= empty + 8 * 7.5, `${withStone} vs ${empty}`); // 8 stone blocks, only those count (7.5: the fake digTime)
+  // A block it cannot dig (stone needs a pickaxe): it will stop there with no_tool, nothing counted beyond
+  const noPickaxe = withDigTime(fakeBot({ blocks: stone }));
+  assert.strictEqual(skills.dig.budget(noPickaxe, { direction: "east", distance: 4 }), 0);
+});
+
+test("strip_mine: kinds it cannot harvest are left out; refused when nothing is left or until is impossible", async () => {
+  await expectResult(skills.strip_mine(fakeBot(), { direction: "east" }), false, "invalid_args");
+  await expectResult(skills.strip_mine(fakeBot(), { direction: "east", blocks: [] }), false, "invalid_args");
+  // No block of the list drops the until item
+  const r0 = await expectResult(
+    skills.strip_mine(fakeBot(), { direction: "east", blocks: ["#iron_ores"], until: { diamond: 2 } }),
+    false,
+    "invalid_args",
+  );
+  assert.strictEqual(r0.details.until_item, "diamond");
+  // No pickaxe: nothing of the list can be harvested
+  const r1 = await expectResult(
+    skills.strip_mine(fakeBot(), { direction: "east", blocks: ["#diamond_ores", "#coal_ores"] }),
+    false,
+    "no_tool",
+  );
+  assert.ok(r1.details.skipped.diamond_ore.includes("iron_pickaxe"));
+  // A wooden pickaxe: coal yes, diamond no; with until diamond, digging would be for nothing
+  const wooden = { inventory: { wooden_pickaxe: 1 } };
+  const r2 = await expectResult(
+    skills.strip_mine(fakeBot(wooden), { direction: "east", blocks: ["#diamond_ores", "#coal_ores"], until: { diamond: 1 } }),
+    false,
+    "no_tool",
+  );
+  assert.strictEqual(r2.details.until_item, "diamond");
+  // Without until it goes on with coal (and the fake world, all air, opens at once)
+  const r3 = await expectResult(
+    skills.strip_mine(fakeBot(wooden), { direction: "east", blocks: ["#diamond_ores", "#coal_ores"] }),
+    false,
+    "opening",
+  );
+  assert.ok(r3.details.skipped.diamond_ore && !r3.details.skipped.coal_ore);
+  assert.strictEqual(skills.strip_mine.budget(fakeBot(), { direction: "east", max_seconds: 120 }), 120);
 });

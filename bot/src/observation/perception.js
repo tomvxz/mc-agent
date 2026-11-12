@@ -55,8 +55,10 @@ function tablesOf(bot) {
     const size = Math.max(...blocks.map((b) => b.maxStateId)) + 1;
     const t = { opaque: new Uint8Array(size), empty: new Uint8Array(size) };
     for (const b of blocks) {
-        if (!b.transparent && b.boundingBox === "block") t.opaque.fill(1, b.minStateId, b.maxStateId + 1);
-        if (["air", "cave_air", "void_air"].includes(b.name)) t.empty.fill(1, b.minStateId, b.maxStateId + 1);
+        if (!b.transparent && b.boundingBox === "block")
+            t.opaque.fill(1, b.minStateId, b.maxStateId + 1);
+        if (["air", "cave_air", "void_air"].includes(b.name))
+            t.empty.fill(1, b.minStateId, b.maxStateId + 1);
     }
     tables.set(bot.registry, t);
     return t;
@@ -96,7 +98,9 @@ function walkRay(stateAt, from, d, range, visit) {
     const o = [from.x, from.y, from.z];
     const step = d.map(Math.sign);
     const tDelta = d.map((v) => (v === 0 ? Infinity : Math.abs(1 / v)));
-    const tMax = d.map((v, i) => (v > 0 ? (c[i] + 1 - o[i]) / v : v < 0 ? (o[i] - c[i]) / -v : Infinity));
+    const tMax = d.map((v, i) =>
+        v > 0 ? (c[i] + 1 - o[i]) / v : v < 0 ? (o[i] - c[i]) / -v : Infinity,
+    );
     let t = 0;
     while (t <= range) {
         if (visit(c[0], c[1], c[2], stateAt(c[0], c[1], c[2]))) return;
@@ -114,11 +118,17 @@ function seen(bot, eye, point, except = null) {
     if (length < 0.01) return true;
     const { opaque } = tablesOf(bot);
     let blocked = false;
-    walkRay(stateReader(bot), eye, d.map((v) => v / length), length, (x, y, z, s) => {
-        if (except && x === except.x && y === except.y && z === except.z) return true; // reached the target
-        if (s > 0 && opaque[s]) blocked = true;
-        return blocked;
-    });
+    walkRay(
+        stateReader(bot),
+        eye,
+        d.map((v) => v / length),
+        length,
+        (x, y, z, s) => {
+            if (except && x === except.x && y === except.y && z === except.z) return true; // reached the target
+            if (s > 0 && opaque[s]) blocked = true;
+            return blocked;
+        },
+    );
     return !blocked;
 }
 
@@ -133,7 +143,11 @@ function blockVisible(bot, eye, p, b) {
         const d = eye[axis] - center[axis];
         if (Math.abs(d) <= 0.5) continue; // this face is turned away (or the eyes are level with it)
         const out = Math.sign(d) * 0.51;
-        const face = center.offset(axis === "x" ? out : 0, axis === "y" ? out : 0, axis === "z" ? out : 0);
+        const face = center.offset(
+            axis === "x" ? out : 0,
+            axis === "y" ? out : 0,
+            axis === "z" ? out : 0,
+        );
         if (seen(bot, eye, face, p)) return true;
     }
     return false;
@@ -194,7 +208,8 @@ function inSight(bot, radius = SIGHT_RADIUS) {
         const distance = Math.hypot(x - pos.x, y - pos.y, z - pos.z);
         if (distance > radius) continue;
         const name = bot.registry.blocksByStateId[s]?.name ?? String(s);
-        const entry = blocks[name] || (blocks[name] = { count: 0, nearest: null, distance: Infinity });
+        const entry =
+            blocks[name] || (blocks[name] = { count: 0, nearest: null, distance: Infinity });
         entry.count++;
         if (distance < entry.distance) {
             entry.distance = distance;
@@ -204,8 +219,24 @@ function inSight(bot, radius = SIGHT_RADIUS) {
     return blocks;
 }
 
+// Where are the perceived blocks of some kinds (a Set of block ids), within radius: [{ x, y, z, name }]
+// (the same look as inSight, with positions: used by dig to stop when a block of interest appears)
+function perceivedBlocks(bot, ids, radius = SIGHT_RADIUS) {
+    const pos = bot.entity.position;
+    const found = [];
+    for (const [key, s] of lookAround(bot, mode === "all")) {
+        const block = bot.registry.blocksByStateId[s];
+        if (!block || !ids.has(block.id)) continue;
+        const [x, y, z] = key.split(",").map(Number);
+        if (Math.hypot(x - pos.x, y - pos.y, z - pos.z) <= radius)
+            found.push({ x, y, z, name: block.name });
+    }
+    return found;
+}
+
 // Does the bot perceive this block / entity, with the current setting? (a focused look: used by find)
-const perceivesBlock = (bot, p) => mode === "all" || blockVisible(bot, eyes(bot), p, bot.blockAt(p));
+const perceivesBlock = (bot, p) =>
+    mode === "all" || blockVisible(bot, eyes(bot), p, bot.blockAt(p));
 const perceivesEntity = (bot, e) => mode === "all" || entityVisible(bot, eyes(bot), e);
 
 export {
@@ -214,6 +245,7 @@ export {
     eyes,
     inSight,
     lookAround,
+    perceivedBlocks,
     perceivesBlock,
     perceivesEntity,
     perception,

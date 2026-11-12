@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import test from "node:test";
-import { blockTag, findItemTag, inBlockTag, itemGroupOf, recordTags } from "../../src/tags.js";
+import { blockTag, findItemTag, inBlockTag, isFluid, itemGroupOf, recordTags } from "../../src/game/tags.js";
 
 test("tags: block and item tags are read from the server's packet, each in its own registry", () => {
     const bot = { _client: new EventEmitter() };
@@ -40,4 +40,20 @@ test("tags: a set of items is named with the game's group only if it is EXACTLY 
     assert.equal(itemGroupOf(bot, ["oak_planks", "birch_planks"]), null); // a subset of a group: no name
     // More variants than the group holds: not that group either
     assert.equal(itemGroupOf(bot, ["oak_planks", "birch_planks", "spruce_planks", "acacia_planks"]), null);
+});
+
+test("tags: the game's fluids are the blocks named like its fluid tags", () => {
+    const bot = { _client: new EventEmitter() };
+    recordTags(bot);
+    assert.throws(() => isFluid(bot, { name: "water" }), /fluid tags not received/);
+    bot._client.emit("tags", {
+        tags: [{
+            tagType: "minecraft:fluid",
+            tags: [{ tagName: "minecraft:lava", entries: [4, 3] }, { tagName: "minecraft:water", entries: [2, 1] }],
+        }],
+    });
+    assert.equal(isFluid(bot, { name: "water" }), true);
+    assert.equal(isFluid(bot, { name: "lava" }), true);
+    assert.equal(isFluid(bot, { name: "stone" }), false);
+    assert.equal(isFluid(bot, { name: "bubble_column" }), true); // water for the game, not named so
 });

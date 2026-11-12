@@ -8,7 +8,7 @@ Usage:
     with EpisodeLog() as log:
         log.start(goal="craft a wooden pickaxe", model={...},
                   system_prompt="...", tools=[...], max_turns=10)
-        log.turn(new_messages=[...], raw_response={...}, plan=[...])
+        log.turn(messages=[...], raw_response={...}, plan=[...])
         log.end(success=True, reason="done", skill_calls=7)
 If the block exits on an exception before end(), an episode_end with reason "crash" (or
 "interrupted" for Ctrl+C) is written automatically.
@@ -24,7 +24,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 REPO = Path(__file__).resolve().parents[1]
 # Development data by default; a collection run writes into its own folder (Body.run()["data_dir"])
@@ -61,7 +61,7 @@ def new_episode_id() -> str:
 
 
 def code_version() -> str:
-    """Git commit of the code, "+dirty" if bot/ or brain/ has uncommitted changes (like bot/src/version.js)."""
+    """Git commit of the code, "+dirty" if bot/ or brain/ has uncommitted changes (like bot/src/journal/version.js)."""
 
     def git(*args: str) -> str:
         return subprocess.run(
@@ -122,7 +122,7 @@ class EpisodeLog:
     def turn(
         self,
         *,
-        new_messages: list[dict[str, Any]],
+        messages: list[dict[str, Any]],
         raw_response: Any,
         plan: list[dict[str, Any]] | None,
         missing_capability: str | None = None,
@@ -130,15 +130,22 @@ class EpisodeLog:
         parse_error: str | None = None,
         latency: float | None = None,
         tokens: dict[str, int | None] | None = None,
+        conversation: str = "loop",
     ) -> int:
-        """One call to the LLM. Returns the turn number (0, 1, 2...), to pass to Body.execute(turn=...)."""
+        """One call to the LLM. Returns the turn number (0, 1, 2...), to pass to Body.execute(turn=...).
+
+        messages: EXACTLY what the LLM received at this call (system message included), not only what
+        was added: later the prompt is a view rebuilt at every turn, no longer a growing conversation.
+        conversation: "goal_definition" for the separate define_goal call (goal.py), else "loop".
+        """
         self._check_open()
         number = self._turns
         self._write(
             "llm_turn",
             {
                 "turn": number,
-                "new_messages": new_messages,
+                "conversation": conversation,
+                "messages": messages,
                 "raw_response": raw_response,
                 "plan": plan,
                 "missing_capability": missing_capability,

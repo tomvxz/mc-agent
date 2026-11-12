@@ -1,7 +1,7 @@
-import { inSight, perceivesEntity, perception, SIGHT_RADIUS } from "../perception.js";
-import { round1 } from "./utils.js";
+import { inSight, perceivesEntity, perception, SIGHT_RADIUS } from "../../observation/perception.js";
+import { round1 } from "../utils.js";
 
-// Question (changes nothing in the world): summary of what the bot PERCEIVES around it (src/perception.js:
+// Question (changes nothing in the world): summary of what the bot PERCEIVES around it (src/observation/perception.js:
 // by default in line of sight, not through walls). The blocks are the same summary as the state's
 // in_sight (one computation), within the radius asked; + the entities.
 async function scan(bot, { radius = 16 } = {}) {
@@ -40,7 +40,7 @@ async function scan(bot, { radius = 16 } = {}) {
             perception: perception(),
             blocks,
             entities,
-            // counts are cells seen by a fan of rays (src/perception.js), not every block of the kind
+            // counts are cells seen by a fan of rays (src/observation/perception.js), not every block of the kind
         },
     };
 }

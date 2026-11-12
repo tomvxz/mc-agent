@@ -7,8 +7,8 @@
 // - "Edge" cases: one trial each, the skill must return exactly the expected reason.
 // Everything goes through execute(): every trial is logged with source "test:<skill>".
 
-import execute from "../../src/execute.js";
-import { observe } from "../../src/state.js";
+import execute from "../../src/execution/execute.js";
+import { observe } from "../../src/observation/state.js";
 import { prepareArena, resetArena } from "./arena.js";
 
 const SUITES = [
@@ -23,6 +23,8 @@ const SUITES = [
     "scan",
     "explore",
     "mine",
+    "dig",
+    "strip_mine",
     "walk",
     "press",
 ];

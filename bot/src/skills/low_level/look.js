@@ -1,7 +1,7 @@
 // Low level: turn the head. yaw and pitch in radians, the same convention as the state (observe):
 // yaw 0 = north (-z), pi/2 = west; pitch 0 = level, positive = up. Useful before press.
 // Not shown to the LLM for now (see SHOWN_TO_LLM).
-import { round1 } from "./utils.js";
+import { round1 } from "../utils.js";
 
 async function look(bot, { yaw, pitch = 0 } = {}) {
     if (!Number.isFinite(yaw) || !Number.isFinite(pitch) || Math.abs(pitch) > Math.PI / 2)

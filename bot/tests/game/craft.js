@@ -1,3 +1,4 @@
+import craft from "../../src/skills/actions/craft.js";
 import { CENTER as C, giveAndWait, placeAndWait } from "./arena.js";
 
 // Give a list of items: { oak_log: 3 }
@@ -17,6 +18,16 @@ const nominal = [
         setup: give({ oak_log: 1 }),
         args: { item: "oak_planks", count: 4 },
         verify: gained("oak_planks", 4),
+    },
+    {
+        // 2 crafts in one call (8 planks from 2 logs): the inventory seen by the bot must be right
+        // (src/game/fixes.js, fixCraftSync)
+        name: "planks x8 (2 crafts in the 2x2 grid)",
+        setup: give({ oak_log: 2 }),
+        args: { item: "oak_planks", count: 8 },
+        verify: (r, before, after) =>
+            ((after.inventory.oak_planks || 0) - (before.inventory.oak_planks || 0) === 8 && !after.inventory.oak_log) ||
+            `planks +${(after.inventory.oak_planks || 0) - (before.inventory.oak_planks || 0)}, logs left ${after.inventory.oak_log || 0}`,
     },
     {
         name: "sticks (2x2)",
@@ -43,6 +54,27 @@ const nominal = [
         },
         args: { item: "wooden_pickaxe" },
         verify: gained("wooden_pickaxe", 1),
+    },
+    {
+        // Seen 2026-11-12: right after a craft at a table, crafts in the 2x2 grid failed (4 planks of 8, then
+        // crafts that hung): the inventory seen by the bot was stale (src/game/fixes.js, resyncWindow). The setup
+        // crafts at a table (a direct call: not a trial), then the trial is planks x8 in the 2x2 grid.
+        name: "planks x8 right after a craft at a table",
+        setup: async (bot) => {
+            await give({ oak_planks: 3, stick: 2, oak_log: 2 })(bot);
+            await placeAndWait(
+                bot,
+                `/setblock ${C.x + 2} ${C.y} ${C.z + 2} crafting_table`,
+                [C.x + 2, C.y, C.z + 2],
+                "crafting_table",
+            );
+            const r = await craft(bot, { item: "wooden_pickaxe" });
+            if (!r.success) throw new Error(`table craft in the setup: ${r.reason}`);
+        },
+        args: { item: "oak_planks", count: 8 },
+        verify: (r, before, after) =>
+            ((after.inventory.oak_planks || 0) - (before.inventory.oak_planks || 0) === 8 && !after.inventory.oak_log) ||
+            `planks +${(after.inventory.oak_planks || 0) - (before.inventory.oak_planks || 0)}, logs left ${after.inventory.oak_log || 0}`,
     },
 ];
 

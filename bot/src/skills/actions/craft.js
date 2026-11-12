@@ -1,7 +1,7 @@
-import { step } from "../steps.js";
-import { itemGroupOf } from "../tags.js";
+import { step } from "../../execution/steps.js";
+import { itemGroupOf } from "../../game/tags.js";
 import move_to from "./move_to.js";
-import { waitUntil } from "./utils.js";
+import { waitUntil } from "../utils.js";
 
 // What a recipe needs, like the game's recipe book shows it to a player: for the recipe(s) the bot
 // is closest to being able to make, each ingredient's required and owned count, how many items one
