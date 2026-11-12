@@ -8,6 +8,13 @@ branché sur le VRAI jeu via Mineflayer. Projet d'apprentissage : l'utilisateur 
   latent, stabilité des compétences, étapes A à J) : `docs/architecture.md`. S'y référer avant de concevoir
   un nouveau composant, et la tenir à jour quand une décision change.
 - `server/` : serveur Paper 1.21.11 local (online-mode=false). Le bot est op.
+- `scripts/` (versionné ; `server/` est ignoré par git) : `server_start.sh` (en arrière-plan, attend « Done »,
+  console dans `server/logs/console.out`), `server_stop.sh` (SIGTERM : Paper sauvegarde puis s'arrête),
+  `use_world.sh <graine> [--fresh]` (prochain démarrage sur `worlds/<graine>`, réutilisé s'il existe ; `--fresh`
+  le régénère), `use_world.sh --remove <graine>` / `--list` (jamais le monde courant, jamais un monde gardé :
+  fichier `worlds/<graine>/keep`, pour le monde d'évaluation), `change_world.sh <graine> [--remove-previous]`
+  (arrêt + monde + démarrage, pour changer de monde la nuit sans les accumuler ; bot arrêté avant).
+  Un nouveau monde prend la difficulté de `server.properties` (normal, décidé pour la collecte le 24/10/2026), pas le paisible du monde actuel.
 - `bot/` : Node.js, Mineflayer + mineflayer-pathfinder, modules ES (`import`/`export`, `"type": "module"`).
   Extension `.js` obligatoire dans les chemins relatifs. Les bibliothèques CommonJS (Mineflayer, pathfinder...)
   s'importent par défaut puis se déstructurent : `import pf from 'mineflayer-pathfinder'; const { goals } = pf`
@@ -219,7 +226,7 @@ branché sur le VRAI jeu via Mineflayer. Projet d'apprentissage : l'utilisateur 
 ## Feuille de route (mise à jour)
 5. Compétences : primitives générales d'abord, puis raccourcis, puis questions et exploration.
    [fait : move_to, break_block, pick_up, place_block, craft, eat, find, scan, explore, collect_block, mine ;
-    lot 2 : attack, equip, use_item, container, smelt, wait]
+    lot 2 : attack, equip, use_item, container, smelt, wait ; sous terre : dig, strip_mine]
 6. Agent LLM baseline avec le champ `missing_capability` ; mesurer où il échoue.
    Le LLM prend directement les sorties de Node (pas encore de world model) : c'est la baseline de l'étape 8.
    [en cours : banc d'épisodes, condition de but ; tâches plus longues à ajouter (crafting_table, pioche)]
@@ -306,13 +313,32 @@ pas des engagements ; en ajouter, en retirer selon ce que montrent les données.
 - Compétences revues avant de figer (21/10/2026) : `place_block` accepte ce que le jeu remplace (tag
   replaceable ET sans boîte de collision : herbe oui, fleurs et neige épaisse non) ; `break_block` a
   `require_tool` (true par défaut ; false = casser sans l'outil, `no_drop`) ; `find`/`mine` acceptent un groupe
-  du jeu (`#logs`) ; fin du temps limite unique de 60 s (voir Conventions : budget, progrès, alertes) ; `mine`
+  du jeu (`#logs`) ; `break_block` refuse un bloc PAS EN VUE (`not_seen`, sans dire ce que c'est : sinon
+  la réponse voyait à travers les murs ; pour découvrir, creuser vers lui) ; liquides = tags de fluides du
+  serveur (minecraft-data dit l'eau « cassable »), plus `bubble_column` (de l'eau pour le jeu, non dit au client) ; fin du temps limite unique de 60 s (voir Conventions : budget, progrès, alertes) ; `mine`
   plafonné par son budget (marche jusqu'au plus proche + ~5 s par bloc : ~18 blocs par appel). À décider : `explore` (max 256 -> 64 ?).
+  Écrits le 23/10/2026 (tests unitaires OK, ARÈNE PAS ENCORE LANCÉE, pas encore montrés au LLM) :
+  `dig(direction, distance, slope level|up|down, stop_at)` (tunnel 1x2, escaliers, arrêt quand un bloc de la
+  liste APPARAÎT), `strip_mine(direction, blocks, max_seconds?, until?, max_distance)` (dig + collect_block :
+  ramasse tout ce qui est dans la liste près du tunnel), `max_seconds` pour toutes les compétences (`runSkill`) :
+  détail dans `docs/architecture.md` (section 8).
   Arène après ces changements (21/10/2026) : toutes les suites passent (règles d'arrêt, tags, place_block).
   Puis après perception, journal v9, walk/press (21/10/2026) : toutes les suites passent sauf `eat` (monde
   paisible) ; walk confirme la convention des angles (0 = nord, π/2 = ouest, −π/2 = est), press le rapport
   marche/sprint du jeu. Relecture du journal v8 : liens parent/étapes cohérents, aucune exception ; corrigé
   la durée des étapes (comptait les observations) -> v9.
+- Bancs du 22/10/2026 (code 73f8b9d) : terrain graine 3, 30 lieux, ligne de vue : mine 27/27, explore 29/30
+  (1 timeout de budget), move_to 25/26 (1 alerte juste : posé sur un bambou, chute de 10 blocs), place_block
+  17/17 ; biomes variés. Épisodes crafting_table, qwen2.5:14b, contexte 16k : 9/10 (l'échec : a priori « chêne »
+  avec de l'épicéa en poche). Avec un contexte de 4096 (Ollama relancé sans OLLAMA_CONTEXT_LENGTH), les
+  épisodes ne valent rien : vérifier `context_length`.
+- Corrigé : plusieurs fabrications d'un coup dans la grille 2x2 faussaient l'inventaire vu par le bot (Mineflayer
+  ne resynchronise qu'après une table) -> `fixCraftSync` (src/fixes.js), cas d'arène « planks x8 » qui passe ;
+  les alertes comparent à la vérification PRÉCÉDENTE (régénération puis coup, monstre qui revient) ; le bot
+  s'arrête s'il perd le serveur (vu : Mac en veille, écran rabattu ; lancer les longs runs sur secteur avec
+  `caffeinate -s`, écran ouvert).
+- Écartés pour l'instant (décision de l'utilisateur) : refuser un lieu au sol non plein (bambou), garde-fou
+  sur la taille du contexte d'Ollama.
 - `observe` revu (journal v8) : il garde TOUT ce que le client sait (le serveur envoie les blocs derrière les
   murs) et MARQUE ce que le bot voit (ligne de vue dans toutes les directions : masque de la grille, `visible`
   des entités). La perception = un masque sur la même ligne, pas un second format. Ajoutés : état des blocs,
@@ -333,7 +359,7 @@ pas des engagements ; en ajouter, en retirer selon ce que montrent les données.
   (via find), `scan` et la vue du LLM ne voient que la ligne de vue par défaut ; `bench --xray`,
   `--compare sight`. Pas encore : la mémoire de ce qui a été vu ; le pathfinder planifie toujours avec tout
   ce que le client sait (mécanique du corps) ; l'alerte `hostile_near` compte aussi un monstre derrière un
-  mur (un joueur l'entend). Grille : rayon 8 (17³ = 4913 cases, 11 Ko, +13 ms sur r5) ; au-delà, `in_sight` (32 blocs).
+  mur (un joueur l'entend). Grille : rayon 16 depuis le 25/10/2026 (33³ = 35 937 cases, 86 Ko, ~33 ms ; rayon 8 : 11 Ko, ~5 ms), choisie large car on peut découper une grande grille, jamais agrandir une petite ; au-delà, `in_sight` (32 blocs).
 - Le script de rejeu d'un moment de décision (plusieurs graines, sans le jeu) est dans le scratchpad : à intégrer
   à `brain/` si on en refait l'usage.
 

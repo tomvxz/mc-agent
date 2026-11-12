@@ -4,7 +4,7 @@
 //         A group ("#planks"): the recipe of each of its items (birch_planks <- birch_log...).
 //   uses: what is crafted DIRECTLY from it? (an item or a group: "birch_log", "#logs"), like the
 //         "usage" section of the wiki.
-// Nothing about how to get an ingredient, nothing deeper: the LLM asks again and composes the chain.
+// Nothing about how to get an ingredient
 import { findItemTag } from "../tags.js";
 import { recipeNeeds } from "./craft.js";
 
@@ -20,10 +20,15 @@ function itemIds(bot, name) {
 
 // The ingredient ids of one recipe of the game data (shaped: inShape, shapeless: ingredients)
 const ingredientIds = (r) =>
-    (r.inShape ? r.inShape.flat() : r.ingredients || []).map((x) => (typeof x === "object" && x ? x.id : x)).filter((x) => x != null && x >= 0);
+    (r.inShape ? r.inShape.flat() : r.ingredients || [])
+        .map((x) => (typeof x === "object" && x ? x.id : x))
+        .filter((x) => x != null && x >= 0);
+
 // A 3x3 recipe needs a crafting table (wider or taller than 2, or more than 4 ingredients)
 const needsTable = (r) =>
-    r.inShape ? r.inShape.length > 2 || r.inShape.some((row) => row.length > 2) : (r.ingredients || []).length > 4;
+    r.inShape
+        ? r.inShape.length > 2 || r.inShape.some((row) => row.length > 2)
+        : (r.ingredients || []).length > 4;
 
 async function recipe(bot, { item, uses } = {}) {
     // 1. Exactly one of item / uses, a string
@@ -40,7 +45,11 @@ async function recipe(bot, { item, uses } = {}) {
         for (const [resultId, list] of Object.entries(bot.registry.recipes || {})) {
             const r = list.find((x) => ingredientIds(x).some((id) => wanted.has(id)));
             if (!r) continue;
-            used_in.push({ item: bot.registry.items[resultId].name, makes: r.result.count, needs_table: needsTable(r) });
+            used_in.push({
+                item: bot.registry.items[resultId].name,
+                makes: r.result.count,
+                needs_table: needsTable(r),
+            });
         }
         if (used_in.length === 0) return { success: false, reason: "no_use", details: { uses } };
         return { success: true, reason: "ok", details: { uses, used_in } };

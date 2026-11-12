@@ -16,7 +16,10 @@ async function craftable(bot) {
         const big = bot.recipesFor(id, null, 1, true);
         if (big.length > 0) withTable.push({ item: name, makes: big[0].result.count });
     }
-    const table = bot.findBlock({ matching: bot.registry.blocksByName.crafting_table.id, maxDistance: 32 });
+    const table = bot.findBlock({
+        matching: bot.registry.blocksByName.crafting_table.id,
+        maxDistance: 32,
+    });
     if (now.length === 0 && withTable.length === 0)
         return { success: false, reason: "nothing_craftable", details: { table_near: !!table } };
     return {
