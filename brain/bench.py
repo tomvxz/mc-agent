@@ -70,6 +70,7 @@ class Task:
     # by the body over everything it knows, not only what the bot sees.
     watch: tuple[str, ...] = ()
 
+
 TASKS = {
     "oak_logs": Task(
         name="oak_logs",
@@ -128,7 +129,11 @@ def run_place(
     sight: the bot perceives only what is in line of sight (False: everything the client knows)."""
     record: dict[str, Any] = {"place": place, "x": x, "z": z}
     setup = body.setup(
-        x, z, task.inventory, perception="sight" if sight else "all", count_blocks=list(task.watch)
+        x,
+        z,
+        task.inventory,
+        perception="sight" if sight else "all",
+        count_blocks=list(task.watch),
     )
     if not setup["success"]:
         return {
@@ -138,7 +143,9 @@ def run_place(
         }
     start = body.state()
     counted = (setup.get("details") or {}).get("blocks_within_32") or {}
-    record["watched_near"] = any(n > 0 for n in counted.values()) if task.watch else None
+    record["watched_near"] = (
+        any(n > 0 for n in counted.values()) if task.watch else None
+    )
 
     outcome = run_episode(
         task.goal,
@@ -187,7 +194,10 @@ def load_episodes_of(body: Body, episode_id: str) -> list[dict[str, Any]]:
 
 
 # The components that can be switched on and off, as run_place's arguments: (name on, name off)
-COMPONENTS = {"goal_condition": ("condition", "no condition"), "sight": ("sight", "x-ray")}
+COMPONENTS = {
+    "goal_condition": ("condition", "no condition"),
+    "sight": ("sight", "x-ray"),
+}
 
 
 def variant_name(options: dict[str, bool]) -> str:
@@ -233,7 +243,11 @@ def format_record(r: dict[str, Any]) -> str:
     )
     condition = f", condition {r['condition']['have']}" if r.get("condition") else ""
     # Skills that failed ON THE WAY (the episode may still reach its goal): what to fix in the body
-    failures = f", skill failures on the way: {', '.join(r['failures'])}" if r.get("failures") else ""
+    failures = (
+        f", skill failures on the way: {', '.join(r['failures'])}"
+        if r.get("failures")
+        else ""
+    )
     return (
         f"{where}: {verdict} ({claim}), {r['turns']} turns, {r['skill_calls']} skill calls, "
         f"{r['unusable']} unusable, {r['duration']} s{near}{condition}{failures}  {r['episode_id']}"

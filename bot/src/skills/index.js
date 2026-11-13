@@ -17,7 +17,8 @@ import scan from "./questions/scan.js";
 import strip_mine from "./shortcuts/strip_mine.js";
 import walk from "./low_level/walk.js";
 
-// The skill catalogue. NAMES are stable: they are inputs of the world model.
+// The skill catalogue. Skills are inputs of the world model: renaming one is a change of the journal format
+// (a new schema_version, noted in docs/journal.md), adding one is always fine.
 export default {
   // Primitives (act on the world)
   move_to,

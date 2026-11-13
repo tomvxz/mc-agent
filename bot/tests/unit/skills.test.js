@@ -692,6 +692,52 @@ test("collect_block = break_block (which no longer picks up) + pick_up", async (
   assert.deepStrictEqual(r.details.collected, { oak_log: 1 });
 });
 
+// Two logs one above the other, visible (the ray towards a face ends inside the target), and digging one
+// drops its item at its center
+function twoLogs() {
+  const blocks = { "2,100,0": "oak_log", "2,101,0": "oak_log" };
+  const bot = fakeBot({ blocks });
+  bot.world = {
+    raycast: (from, dir, range) => {
+      const end = new Point(from.x + dir.x * range, from.y + dir.y * range, from.z + dir.z * range).floored();
+      return blocks[`${end.x},${end.y},${end.z}`] ? bot.blockAt(end) : null;
+    },
+  };
+  let next = 20;
+  bot.dig = async (b) => {
+    delete blocks[`${b.position.x},${b.position.y},${b.position.z}`];
+    itemOnGround(bot, next++, "oak_log", 1, b.position.offset(0.5, 0, 0.5));
+  };
+  return bot;
+}
+
+test("mine: finds, breaks and picks up each block until the count", async () => {
+  const bot = twoLogs();
+  pickUpWhenWalking(bot);
+  const r = await expectResult(skills.mine(bot, { block: "oak_log", count: 2 }), true, "ok");
+  assert.deepStrictEqual([r.details.dug, r.details.collected, r.details.unreachable], [2, { oak_log: 2 }, 0]);
+  assert.ok(!("not_picked_up" in r.details)); // only said when it happened
+});
+
+test("mine: a block broken whose item is picked up later counts as dug (not partial)", async () => {
+  // Seen in the arena (2026-11-12): the first log's item could not be reached at once, then was picked up
+  // on the way to the second log. 2 logs asked, 2 collected: a success, with not_picked_up saying so.
+  const bot = twoLogs();
+  pickUpWhenWalking(bot);
+  const walk = bot.pathfinder.goto;
+  let walks = 0;
+  bot.pathfinder.goto = async (goal) => {
+    if (walks++ === 0) {
+      const e = new Error("No path to the goal!");
+      e.name = "NoPath";
+      throw e; // the first item: unreachable for now
+    }
+    return walk(goal); // later walks pick up every item of the column (the first one too)
+  };
+  const r = await expectResult(skills.mine(bot, { block: "oak_log", count: 2 }), true, "ok");
+  assert.deepStrictEqual([r.details.dug, r.details.collected, r.details.not_picked_up], [2, { oak_log: 2 }, 1]);
+});
+
 test("collect_block: the item fell out of reach -> not_collected", async () => {
   const blocks = { "2,100,0": "oak_log" };
   const bot = fakeBot({ blocks });

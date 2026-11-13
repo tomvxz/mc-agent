@@ -111,6 +111,7 @@ async function mine(bot, { block, count = 1 } = {}) {
             dug,
             collected: gainedSince(bot, before),
             unreachable,
+            ...(not_picked_up && { not_picked_up }),
             ...(cleared && { cleared }),
         },
     };

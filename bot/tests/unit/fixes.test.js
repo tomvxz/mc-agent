@@ -2,7 +2,7 @@ import assert from "node:assert";
 import test from "node:test";
 import AABB from "prismarine-physics/lib/aabb.js";
 import { EventEmitter } from "node:events";
-import { fixCraftSync, fixWallContact, resyncWindow, SYNC_QUIET_MS, WALL_GAP } from "../../src/game/fixes.js";
+import { fixCraftSync, fixStateId, fixWallContact, resyncWindow, SYNC_QUIET_MS, WALL_GAP } from "../../src/game/fixes.js";
 
 test("fixWallContact: a horizontal move stops 1 mm before a block face, a vertical one does not", () => {
     fixWallContact();
@@ -68,4 +68,29 @@ test("resyncWindow gives up after its cap when the server never answers", async 
   const start = Date.now();
   assert.strictEqual(await resyncWindow(bot, bot.inventory), false);
   assert.ok(Date.now() - start >= 1900);
+});
+
+test("fixStateId: each window's clicks carry that window's latest state id; -1 and other packets are untouched", () => {
+  const sent = [];
+  const client = Object.assign(new EventEmitter(), { write: (name, packet) => sent.push([name, packet]) });
+  fixStateId({ _client: client });
+  client.emit("window_items", { windowId: 0, stateId: 5 }); // the inventory
+  client.emit("set_slot", { windowId: 1, stateId: 12 }); // a crafting table
+  client.emit("set_slot", { windowId: 1, stateId: 13 }); // its latest
+  // Mineflayer keeps ONE counter for every window: it would send 5 for the table
+  client.write("window_click", { windowId: 1, stateId: 5, slot: 3 });
+  client.write("window_click", { windowId: 0, stateId: 13, slot: 9 });
+  client.write("window_click", { windowId: 0, stateId: -1, slot: -999 }); // "send me everything": on purpose
+  client.write("window_click", { windowId: 2, stateId: 7, slot: 1 }); // a window never heard of: unchanged
+  client.write("block_dig", { stateId: 99 }); // not a click
+  assert.deepStrictEqual(
+    sent.map(([name, p]) => [name, p.windowId, p.stateId]),
+    [
+      ["window_click", 1, 13],
+      ["window_click", 0, 5],
+      ["window_click", 0, -1],
+      ["window_click", 2, 7],
+      ["block_dig", undefined, 99],
+    ],
+  );
 });

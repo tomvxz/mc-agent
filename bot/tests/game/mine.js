@@ -112,6 +112,21 @@ const edgeCases = [
         expect: "partial",
     },
     { name: "invalid count", args: { block: "oak_log", count: 0 }, expect: "invalid_args" },
+    // The stop rules (src/execution/runSkill.js) in the real game
+    {
+        name: "far too many blocks at once: refused before starting",
+        args: { block: "oak_log", count: 100 }, // ~5 s per block: its budget passes the hard cap
+        expect: "too_long",
+    },
+    {
+        name: "max_seconds shorter than the work: stopped (timeout)",
+        setup: async (bot) => {
+            await column(bot, 3, 0, 5);
+            await column(bot, -4, 3, 5);
+        },
+        args: { block: "oak_log", count: 10, max_seconds: 1 }, // stopped at 1 + 5 s of grace, the work needs ~50 s
+        expect: "timeout",
+    },
     {
         name: "stone without a pickaxe",
         setup: (bot) =>

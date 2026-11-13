@@ -1,9 +1,9 @@
-import runSkill, { STOP_REASONS } from "./runSkill.js";
+import { startTrace, summarizeForBrain } from "../journal/trace.js";
+import { observe } from "../observation/state.js";
 import { resolveArgs } from "../skills/catalogue.js";
 import skills from "../skills/index.js";
-import { observe } from "../observation/state.js";
+import runSkill, { STOP_REASONS } from "./runSkill.js";
 import { current, nextSeq, safe, writeLine } from "./steps.js";
-import { startTrace, summarizeForBrain } from "../journal/trace.js";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -14,7 +14,6 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // server (20 ticks/s), longer on a slow one, at most MAX_SETTLE_MS (a frozen server or a sleeping Mac).
 const SETTLE_TICKS = 6;
 const MAX_SETTLE_MS = 2000;
---resume;
 
 const tickRates = new WeakMap(); // bot -> { age, ms, perSecond }
 

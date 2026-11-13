@@ -27,7 +27,8 @@ const perception = () => mode;
 const SIGHT_RADIUS = 32;
 // Angle between two neighbouring rays: 1.5 degrees, so that one block at 32 blocks (about 1.8 degrees
 // wide) is still hit. 4 pi / angle^2 = about 18,000 rays. Measured on the server (2026-10-21, our DDA
-// below): 13 ms in a cave, about 100 ms in open air (every ray goes the full 32 blocks).
+// below): 13 ms in a cave, about 100 ms in open air (every ray goes the full 32 blocks); about 5 times less
+// since 2026-11-13 (the cells seen are kept as numbers, see View).
 const RAY_ANGLE = (1.5 * Math.PI) / 180;
 const RAY_COUNT = Math.round((4 * Math.PI) / (RAY_ANGLE * RAY_ANGLE));
 
@@ -74,14 +75,23 @@ function stateReader(bot) {
             return b ? b.stateId : -1;
         };
     }
-    const columns = new Map();
+    const columns = new Map(); // chunk key -> column (null: not loaded)
     const p = { x: 0, y: 0, z: 0 };
+    // A number as the chunk key (a text key cost one string per cell): unique while |chunk z| < 2^21, and the
+    // world is 30 million blocks wide (1.9 million chunks). Most cells in a row fall in the same chunk.
+    let lastKey = NaN;
+    let column = null;
     return (x, y, z) => {
-        const key = `${x >> 4},${z >> 4}`;
-        let column = columns.get(key);
-        if (column === undefined) {
-            column = getColumn(x >> 4, z >> 4) || null;
-            columns.set(key, column);
+        const cx = x >> 4;
+        const cz = z >> 4;
+        const key = cx * 4194304 + cz;
+        if (key !== lastKey) {
+            column = columns.get(key);
+            if (column === undefined) {
+                column = getColumn(cx, cz) || null;
+                columns.set(key, column);
+            }
+            lastKey = key;
         }
         if (!column) return -1;
         p.x = x & 15;
@@ -158,7 +168,7 @@ const entityVisible = (bot, eye, e) => seen(bot, eye, e.position.offset(0, (e.he
 
 // --- Looking around: the cells the fan of rays crosses. Kept until the eyes move or a block changes
 // (a skill's state before and after, a question that changes nothing: no second computation).
-const views = new WeakMap(); // bot -> { key, version, cells }
+const views = new WeakMap(); // bot -> { [xray]: { key, version, view } }
 const versions = new WeakMap(); // bot -> world version (+1 at each block change or chunk load)
 function worldVersion(bot) {
     if (!versions.has(bot)) {
@@ -170,30 +180,75 @@ function worldVersion(bot) {
     return versions.get(bot);
 }
 
-// Map "x,y,z" -> state id of every cell seen (empty ones too: seen empty space is known). The true
-// view, whatever the setting (the journal's marks); xray: every cell the rays cross, walls or not.
+// The cells seen, kept in a cube of numbers around the eyes' cell (a ray of SIGHT_RADIUS ends at most
+// SIGHT_RADIUS + 1 cells away): one number per cell instead of an "x,y,z" text in a Map, which cost a new
+// string for each of the ~700,000 cells the rays cross. Measured 2026-11-13 on a test world in open air:
+// ~130 ms -> ~23 ms per look, with the same cells in the same order. `states` holds the state id of each cell seen (-1: not seen), `order` the cells in the order they
+// were first seen (the same order as before: it decides which cell is "the nearest" among equals).
+const HALF = SIGHT_RADIUS + 2;
+const SIDE = 2 * HALF + 1;
+class View {
+    constructor(eye) {
+        this.ox = Math.floor(eye.x) - HALF;
+        this.oy = Math.floor(eye.y) - HALF;
+        this.oz = Math.floor(eye.z) - HALF;
+        this.states = new Int32Array(SIDE * SIDE * SIDE).fill(-1);
+        this.order = [];
+    }
+    index(x, y, z) {
+        const dx = x - this.ox;
+        const dy = y - this.oy;
+        const dz = z - this.oz;
+        if (dx < 0 || dy < 0 || dz < 0 || dx >= SIDE || dy >= SIDE || dz >= SIDE) return -1;
+        return (dy * SIDE + dz) * SIDE + dx;
+    }
+    add(x, y, z, stateId) {
+        const i = this.index(x, y, z);
+        if (i >= 0 && this.states[i] === -1) {
+            this.states[i] = stateId;
+            this.order.push(i);
+        }
+    }
+    has(x, y, z) {
+        const i = this.index(x, y, z);
+        return i >= 0 && this.states[i] !== -1;
+    }
+    // Every cell seen, in order: fn(x, y, z, stateId)
+    forEach(fn) {
+        for (const i of this.order) {
+            const dx = i % SIDE;
+            const rest = (i - dx) / SIDE;
+            const dz = rest % SIDE;
+            const dy = (rest - dz) / SIDE;
+            fn(this.ox + dx, this.oy + dy, this.oz + dz, this.states[i]);
+        }
+    }
+}
+
+// The view (see View) of every cell seen (empty ones too: seen empty space is known). The true view, whatever
+// the setting (the journal's marks); xray: every cell the rays cross, walls or not.
 function lookAround(bot, xray = false) {
     const eye = eyes(bot);
-    const key = `${xray},${eye.x.toFixed(2)},${eye.y.toFixed(2)},${eye.z.toFixed(2)}`;
+    const key = `${eye.x.toFixed(2)},${eye.y.toFixed(2)},${eye.z.toFixed(2)}`;
     const version = worldVersion(bot);
     const cached = views.get(bot)?.[xray];
-    if (cached && cached.key === key && cached.version === version) return cached.cells;
+    if (cached && cached.key === key && cached.version === version) return cached.view;
     const { opaque } = tablesOf(bot);
     const stateAt = stateReader(bot);
-    const cells = new Map();
+    const view = new View(eye);
     for (const d of fan()) {
         walkRay(stateAt, eye, d, SIGHT_RADIUS, (x, y, z, s) => {
             if (s < 0) return true; // not loaded: nothing beyond
-            cells.set(`${x},${y},${z}`, s);
+            view.add(x, y, z, s);
             return !xray && opaque[s] === 1;
         });
     }
-    views.set(bot, { ...views.get(bot), [xray]: { key, version, cells } });
-    return cells;
+    views.set(bot, { ...views.get(bot), [xray]: { key, version, view } });
+    return view;
 }
 
 // Does the bot see the cell at p, looking around (the true view)?
-const seesCell = (bot, p) => lookAround(bot).has(`${p.x},${p.y},${p.z}`);
+const seesCell = (bot, p) => lookAround(bot).has(p.x, p.y, p.z);
 
 // What is perceived within radius (at most SIGHT_RADIUS): every kind of block (no list), with how many
 // cells of it and the nearest one. { name: { count, nearest: [x, y, z], distance } }. With perception
@@ -202,11 +257,10 @@ function inSight(bot, radius = SIGHT_RADIUS) {
     const { empty } = tablesOf(bot);
     const pos = bot.entity.position;
     const blocks = {};
-    for (const [key, s] of lookAround(bot, mode === "all")) {
-        if (s <= 0 || empty[s]) continue;
-        const [x, y, z] = key.split(",").map(Number);
+    lookAround(bot, mode === "all").forEach((x, y, z, s) => {
+        if (s <= 0 || empty[s]) return;
         const distance = Math.hypot(x - pos.x, y - pos.y, z - pos.z);
-        if (distance > radius) continue;
+        if (distance > radius) return;
         const name = bot.registry.blocksByStateId[s]?.name ?? String(s);
         const entry =
             blocks[name] || (blocks[name] = { count: 0, nearest: null, distance: Infinity });
@@ -215,7 +269,7 @@ function inSight(bot, radius = SIGHT_RADIUS) {
             entry.distance = distance;
             entry.nearest = [x, y, z];
         }
-    }
+    });
     return blocks;
 }
 
@@ -224,13 +278,12 @@ function inSight(bot, radius = SIGHT_RADIUS) {
 function perceivedBlocks(bot, ids, radius = SIGHT_RADIUS) {
     const pos = bot.entity.position;
     const found = [];
-    for (const [key, s] of lookAround(bot, mode === "all")) {
+    lookAround(bot, mode === "all").forEach((x, y, z, s) => {
         const block = bot.registry.blocksByStateId[s];
-        if (!block || !ids.has(block.id)) continue;
-        const [x, y, z] = key.split(",").map(Number);
+        if (!block || !ids.has(block.id)) return;
         if (Math.hypot(x - pos.x, y - pos.y, z - pos.z) <= radius)
             found.push({ x, y, z, name: block.name });
-    }
+    });
     return found;
 }
 
@@ -254,4 +307,5 @@ export {
     seesCell,
     setPerception,
     SIGHT_RADIUS,
+    stateReader,
 };

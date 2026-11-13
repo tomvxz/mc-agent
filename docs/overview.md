@@ -1,6 +1,7 @@
 # Project map
 
-One page to find your way. Details: `CLAUDE.md` (rules and roadmap), `docs/journal.md` (data format),
+One page to find your way. Details: `CLAUDE.md` (rules and principles), `docs/status.md` (where we are, measurements,
+decisions), `docs/journal.md` (data format), `docs/api_contract.json` (fields exchanged by the body and the brain),
 `docs/architecture.md` (the target architecture and the stages to get there).
 
 ## The idea in one picture
@@ -48,7 +49,7 @@ On the Python side, `brain/agent.py` is the loop: state -> prompt -> LLM -> plan
 | | `movements.js` | pathfinder settings: jumps, digs a passage, pillars up, avoids lava and monsters |
 | | `fixes.js` | fixes for Mineflayer bugs (window clicks, inventory resync, difficulty, walls) |
 | | `commands.js` | `runCommand`: send a server command (/tp, /give...) |
-| `skills/` | `index.js` | the list of every skill (names are stable: inputs of the world model) |
+| `skills/` | `index.js` | the list of every skill (inputs of the world model: a rename is a versioned format change) |
 | | `catalogue.js` | what the LLM reads about each skill: description, parameters, failure reasons |
 | | `utils.js` | shared helpers (`gotoWatched` = walking with a stuck detector, pickup...) |
 | | `actions/`, `questions/`, `shortcuts/`, `low_level/` | one skill per file (see below) |

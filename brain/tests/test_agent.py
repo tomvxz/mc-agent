@@ -2,6 +2,8 @@
 
 import json
 
+import httpx
+
 from brain import render
 from brain.agent import run_episode
 from brain.llm import FakeLLM
@@ -179,3 +181,21 @@ def test_text_next_to_the_calls_is_shown_but_not_put_back(tmp_path):
     answer = next(m for m in llm.calls[1] if m["role"] == "assistant")
     assert answer["content"] == "" and answer["tool_calls"]  # templates cannot show both (llm.py)
     assert "thinks: No logs yet: I mine some." in show(load_episodes(path)[outcome["episode_id"]], [])
+
+
+def test_losing_the_body_in_the_middle_of_an_episode_ends_it_cleanly(tmp_path):
+    # The bot disconnects from Minecraft after the first skill: the state can no longer be read (HTTP 503)
+    body = FakeBody(lambda name, args: ok())
+    answer = body.handler
+
+    def handler(request):
+        if request.url.path == "/state" and body.executed:
+            return httpx.Response(503, json={"error": "bot_unavailable", "message": "disconnected"})
+        return answer(request)
+
+    body.handler = handler
+    llm = FakeLLM([plan(("mine", {"block": "oak_log"})), plan(done=True)])
+    outcome = run_episode("get a log", body.client(), llm, episodes_file=tmp_path / "e.jsonl")
+    assert (outcome["success"], outcome["reason"]) == (False, "body_error")
+    end = events(tmp_path / "e.jsonl")[-1]
+    assert end["type"] == "episode_end" and end["outcome"]["reason"] == "body_error"

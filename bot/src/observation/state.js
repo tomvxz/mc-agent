@@ -4,7 +4,7 @@
 // Every part is optional: if one cannot be read (e.g. biome unknown), it is null and the rest is
 // still there. Shape documented in docs/journal.md.
 
-import { entityVisible, eyes, inSight, perception, seesCell, SIGHT_RADIUS } from "./perception.js";
+import { entityVisible, eyes, inSight, lookAround, perception, SIGHT_RADIUS, stateReader } from "./perception.js";
 
 // Hostile = the game data's category "Hostile mobs" (minecraft-data), not a list of ours. It also holds
 // the neutral mobs that attack when provoked (enderman, piglin, spider...) and the end crystal.
@@ -54,26 +54,37 @@ function packBits(bits) {
 // and which cells the bot could see (visible, packBits; see src/observation/perception.js). Cell order: for dy from -R to R, for dz from
 // -R to R, for dx from -R to R (index = (dy+R)*S*S + (dz+R)*S + (dx+R), with S = 2R+1). Unloaded cells
 // are null (and not visible).
+// Fast on purpose (observe runs before and after every skill and step, and blocks Node meanwhile, so the
+// physics ticks come in bursts): each cell's state id is read from the chunk directly, and the name with
+// its state ("oak_log[axis=y]") is made once per state id, not once per cell. Measured 2026-11-13 on a test
+// world: 25 ms -> 3 ms. It must equal the plain grid, block by block: tests/unit/state.test.js.
 function blockGrid(bot, R) {
     const feet = bot.entity.position.floored();
+    const stateAt = stateReader(bot);
+    const view = lookAround(bot);
     const palette = [];
+    const paletteIndex = new Map(); // state id -> index in the palette
     const cells = [];
     const visible = [];
     for (let dy = -R; dy <= R; dy++) {
         for (let dz = -R; dz <= R; dz++) {
             for (let dx = -R; dx <= R; dx++) {
-                const p = feet.offset(dx, dy, dz);
-                const b = bot.blockAt(p);
-                if (!b) {
+                const x = feet.x + dx;
+                const y = feet.y + dy;
+                const z = feet.z + dz;
+                const stateId = stateAt(x, y, z);
+                if (stateId < 0) {
                     cells.push(null);
                     visible.push(false);
                     continue;
                 }
-                const name = blockState(b);
-                let i = palette.indexOf(name);
-                if (i === -1) i = palette.push(name) - 1;
+                let i = paletteIndex.get(stateId);
+                if (i === undefined) {
+                    i = palette.push(blockState(bot.blockAt(feet.offset(dx, dy, dz)))) - 1;
+                    paletteIndex.set(stateId, i);
+                }
                 cells.push(i);
-                visible.push(seesCell(bot, p));
+                visible.push(view.has(x, y, z));
             }
         }
     }
@@ -270,4 +281,4 @@ function observe(bot) {
     };
 }
 
-export { blockState, GRID_RADIUS, isHostile, observe, packBits, trackDeaths, trackFall };
+export { blockGrid, blockState, GRID_RADIUS, isHostile, observe, packBits, trackDeaths, trackFall };

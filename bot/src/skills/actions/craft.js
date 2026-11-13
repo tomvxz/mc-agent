@@ -10,7 +10,7 @@ import { waitUntil } from "../utils.js";
 // per ingredient, and showing only the planks of the wood around; both answered the next question
 // before it was asked (the body itself linked logs -> planks).
 // For now every recipe is known (Mineflayer's data); later a memory may filter them to the ones the
-// agent has met (see CLAUDE.md, Mémoire).
+// agent has met (see docs/status.md, ideas: memory).
 // details.ingredients is a LIST: [{ item: "stick", required: 2, owned: 0 }, ...]. Many recipes accept
 // variants (any planks for a pickaxe): equivalent recipes are merged into one entry,
 // { group: "#planks", one_of: ['oak_planks', ...], required: 3, owned: 0 }; group = the game's own item

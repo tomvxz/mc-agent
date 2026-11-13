@@ -47,6 +47,22 @@ const nominal = [
 
 const edgeCases = [
     { name: "nothing like that around", args: { target: "diamond_ore" }, expect: "not_found" },
+    {
+        // The client knows the log (the server sends every block), but the bot cannot see it: with the default
+        // perception (line of sight, src/observation/perception.js) find must not report it
+        name: "a log enclosed in stone is not seen",
+        setup: async (bot) => {
+            await placeAndWait(
+                bot,
+                `/fill ${C.x + 4} ${C.y} ${C.z - 1} ${C.x + 6} ${C.y + 2} ${C.z + 1} stone`,
+                [C.x + 6, C.y + 2, C.z + 1],
+                "stone",
+            );
+            await placeAndWait(bot, `/setblock ${C.x + 5} ${C.y + 1} ${C.z} oak_log`, [C.x + 5, C.y + 1, C.z], "oak_log");
+        },
+        args: { target: "oak_log" },
+        expect: "not_found",
+    },
     { name: "unknown target", args: { target: "no_such_thing" }, expect: "unknown_target" },
 ];
 

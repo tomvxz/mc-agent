@@ -40,8 +40,10 @@ Joins: transition -> run on `run_id` (versions, seed, server settings); transiti
 - Never filter failures: failed skills, malformed LLM answers and crashes are data.
 - A line whose trace has a `death`, `teleport`, `kicked` or `disconnected` event does not describe
   the effect of the skill alone: filter or weight it.
-- **Format frozen until step 7** (world model): no new field until then. The data is for
-  development only; the format for training will be fixed before the real collection run.
+- **The format evolves with the project, it is never frozen**: each change is a new `schema_version`
+  described below, old lines are never rewritten, and the code reading the journal (the world model) says
+  which versions it reads (and how it maps old fields or skill names). A small collection is a test of the
+  chain, not a commitment on the format.
 - Timestamps are ISO 8601 in UTC (`2026-10-19T10:45:12.345Z`); durations are in seconds; game
   times are in ticks (`bot.time.age`, 20 ticks = 1 s at the normal tick rate); trace times are in
   milliseconds since the start of the skill (`ms`).

@@ -174,6 +174,16 @@ nominal.push({
 
 const edgeCases = [
     {
+        // The stop rules (src/execution/runSkill.js) in the real game: hurt on the way = stopped, the brain decides.
+        // /damage is sent 1 s after the walk starts (about 7 s of walking to the far corner).
+        name: "hurt on the way: stopped with an alert",
+        setup: async (bot) => {
+            setTimeout(() => runCommand(bot, `/damage ${bot.username} 1 minecraft:generic`), 1000);
+        },
+        args: { x: C.x + 20, y: C.y, z: C.z + 20 },
+        expect: "alert",
+    },
+    {
         name: "target enclosed in barrier (unbreakable)",
         setup: (bot) =>
             placeAndWait(

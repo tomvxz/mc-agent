@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { blockState, observe, packBits } from "../../src/observation/state.js";
-import { fakeBot, Point } from "./fakeBot.js";
+import prismarineBlock from "prismarine-block";
+import prismarineChunk from "prismarine-chunk";
+import prismarineRegistry from "prismarine-registry";
+import prismarineWorld from "prismarine-world";
+import { Vec3 } from "vec3";
+import { seesCell } from "../../src/observation/perception.js";
+import { blockGrid, blockState, observe, packBits } from "../../src/observation/state.js";
+import { fakeBot, MC_VERSION, Point } from "./fakeBot.js";
 
 test("state: a block in the game's notation, with its state sorted", () => {
     assert.equal(blockState({ name: "stone", getProperties: () => ({}) }), "stone");
@@ -95,4 +101,59 @@ test("state: in_sight lists every kind of block seen, the grid marks the hidden 
     } finally {
         setPerception("sight");
     }
+});
+
+// A small REAL world, the way Mineflayer keeps it (prismarine-world, real chunk columns), 3 x 3 chunks: ground,
+// a log with its axis, water, and one chunk left unloaded. The fake bot reads blocks one by one; this one
+// goes through the chunks directly, like the real bot.
+async function realWorldBot() {
+    const registry = prismarineRegistry(MC_VERSION);
+    const World = prismarineWorld(registry);
+    const Chunk = prismarineChunk(registry);
+    const world = new World(null);
+    const Block = prismarineBlock(registry);
+    const stone = registry.blocksByName.stone.defaultState;
+    const water = registry.blocksByName.water.defaultState;
+    const log = Block.fromProperties("oak_log", { axis: "x" }, 1).stateId;
+    for (const [cx, cz] of [[-1, -1], [-1, 0], [-1, 1], [0, -1], [0, 0], [0, 1], [1, -1], [1, 0]]) { // (1, 1): not loaded
+        const c = new Chunk({ minY: -64, worldHeight: 384 });
+        for (let x = 0; x < 16; x++)
+            for (let z = 0; z < 16; z++)
+                for (let y = 50; y < 64; y++) c.setBlockStateId(new Vec3(x, y, z), (x + z) % 7 === 0 && y === 63 ? water : stone);
+        if (cx === 0 && cz === 0) c.setBlockStateId(new Vec3(4, 64, 2), log);
+        await world.setColumn(cx, cz, c);
+    }
+    return { registry, world: world.sync, entity: { position: new Vec3(2.5, 64, 2.5), eyeHeight: 1.62 }, blockAt: (p) => world.sync.getBlock(p) };
+}
+
+test("state: the fast grid (chunks read directly) equals the plain one, block by block", async () => {
+    const bot = await realWorldBot();
+    const R = 16;
+    const grid = blockGrid(bot, R);
+    // The plain way: every cell through blockAt, its name with its state, and the line of sight
+    const feet = bot.entity.position.floored();
+    const palette = [];
+    const cells = [];
+    const visible = [];
+    for (let dy = -R; dy <= R; dy++)
+        for (let dz = -R; dz <= R; dz++)
+            for (let dx = -R; dx <= R; dx++) {
+                const p = feet.offset(dx, dy, dz);
+                const b = bot.blockAt(p);
+                if (!b) {
+                    cells.push(null);
+                    visible.push(false);
+                    continue;
+                }
+                const name = blockState(b);
+                if (!palette.includes(name)) palette.push(name);
+                cells.push(palette.indexOf(name));
+                visible.push(seesCell(bot, p));
+            }
+    assert.deepEqual(grid.palette, palette);
+    assert.deepEqual(grid.cells, cells);
+    assert.equal(grid.visible, packBits(visible));
+    // The world is really in it: a log with its axis, water, seen and hidden cells, unloaded cells
+    assert.ok(palette.includes("oak_log[axis=x]") && palette.some((n) => n.startsWith("water")));
+    assert.ok(cells.includes(null) && visible.includes(true) && visible.includes(false));
 });

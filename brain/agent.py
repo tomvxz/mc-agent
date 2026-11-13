@@ -23,7 +23,13 @@ from brain import goal as goals
 from brain import render
 from brain.body import Body, BodyError
 from brain.journal import EpisodeLog
-from brain.llm import GOAL_REACHED, MISSING_CAPABILITY, LLMError, LLMReply, OpenAICompatibleLLM
+from brain.llm import (
+    GOAL_REACHED,
+    MISSING_CAPABILITY,
+    LLMError,
+    LLMReply,
+    OpenAICompatibleLLM,
+)
 
 MAX_STEPS_PER_PLAN = 10  # a longer plan is cut (the LLM sees the results and continues)
 
@@ -104,7 +110,11 @@ def run_episode(
                 reply = llm(definition, render.goal_definition_tools())
             except LLMError as e:
                 return finish(False, "llm_error", str(e))
-            condition, error = (None, reply.parse_error) if reply.parse_error else goals.parse_condition(reply.calls)
+            condition, error = (
+                (None, reply.parse_error)
+                if reply.parse_error
+                else goals.parse_condition(reply.calls)
+            )
             log.turn(
                 messages=definition,
                 conversation="goal_definition",
@@ -124,8 +134,12 @@ def run_episode(
         messages = [{"role": "system", "content": system}, first]
         shown_state = start_state  # the state shown to the LLM at the previous turn
         last_failure = None  # (skill, args, reason) of the previous turn's failure
-        counted = 0  # turns counted against max_turns (a first empty answer is not counted)
-        free_retry_used = False  # the previous answer was empty and asked again for free
+        counted = (
+            0  # turns counted against max_turns (a first empty answer is not counted)
+        )
+        free_retry_used = (
+            False  # the previous answer was empty and asked again for free
+        )
 
         while counted < max_turns:
             # 1. Ask the LLM
@@ -172,11 +186,15 @@ def run_episode(
             )  # never None here: a None plan comes with a parse_error
             if reply.done and not plan and condition is None:
                 return finish(True, "done")
-            if reply.done and not plan:  # with a condition: not met (it would have ended the episode)
+            if (
+                reply.done and not plan
+            ):  # with a condition: not met (it would have ended the episode)
                 feedback = answers(reply, [], catalogue, progress(shown_state)) + [
                     {
                         "role": "user",
-                        "content": render.render_new_state(shown_state, progress=progress(shown_state)),
+                        "content": render.render_new_state(
+                            shown_state, progress=progress(shown_state)
+                        ),
                     }
                 ]
                 messages += feedback
@@ -210,7 +228,11 @@ def run_episode(
             if condition and goals.is_met(condition, state):
                 return finish(True, "condition_met")
             # done=true with a plan: the LLM expects the goal reached once the plan has run
-            if reply.done and condition is None and all(r["result"]["success"] for r in results):
+            if (
+                reply.done
+                and condition is None
+                and all(r["result"]["success"] for r in results)
+            ):
                 return finish(True, "done")
 
             # 5. Show the results and the new state for the next turn (with deaths / damage, and a
@@ -257,7 +279,11 @@ def answers(
             text = render.render_noted(call["name"], plan_succeeded, progress)
         else:
             step = next(remaining, None)
-            text = render.render_result(step, catalogue) if step else render.render_not_run()
+            text = (
+                render.render_result(step, catalogue)
+                if step
+                else render.render_not_run()
+            )
         messages.append({"role": "tool", "tool_call_id": call["id"], "content": text})
     return messages
 
@@ -270,7 +296,9 @@ def main() -> None:
         "--scenario", default=None, help="optional label of the setting"
     )
     parser.add_argument(
-        "--no-condition", action="store_true", help="no goal condition: only the LLM's goal_reached"
+        "--no-condition",
+        action="store_true",
+        help="no goal condition: only the LLM's goal_reached",
     )
     args = parser.parse_args()
 

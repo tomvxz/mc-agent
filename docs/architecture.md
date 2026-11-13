@@ -1,7 +1,7 @@
 # Target architecture and the path to it
 
 Where the project is going, how the parts fit together, and in which order they are built.
-Rules and current state: `CLAUDE.md`. Code map: `docs/overview.md`. Data format: `docs/journal.md`.
+Rules: `CLAUDE.md`. Current state, measurements, decisions: `docs/status.md`. Code map: `docs/overview.md`. Data format: `docs/journal.md`.
 This is a direction, not a commitment: the order is decided by measurements on the benches.
 
 ## 1. The guiding principle
@@ -158,8 +158,10 @@ strategy. Consequences:
   skill simply has no data until it is used (cold start, high uncertainty, which the ensemble shows).
   To help the model generalize to new skills, the skill can be encoded by features of its arguments and
   later by the embedding of its description, not only by a one-hot id.
-- So: freeze only the skills that will be collected (names, arguments, behavior), and keep adding skills
-  as goals need them (CLAUDE.md: add by frequency of `missing_capability`, not by intuition).
+- So: keep the collected skills steady and avoid gratuitous changes, but improving one stays possible: it is
+  a versioned change of format (`docs/journal.md`: new version, old name -> new name), so that old rows stay
+  readable, filtered or weighed. Keep adding skills as goals need them (add by frequency of
+  `missing_capability`, not by intuition).
 
 ### Decided for stage A: digging to find what is hidden (2026-10-23; written: `skills/actions/dig.js`, `skills/shortcuts/strip_mine.js`)
 Hidden blocks are found by DIGGING, never by asking: `break_block` refuses a block not in sight
@@ -196,7 +198,7 @@ then `mine`), or straight tunnels.
 
 | # | Stage | Depends on | Success criterion |
 |---|---|---|---|
-| A | Freeze the collected skills (names, arguments, behavior) | none | a committed catalogue, declared stable |
+| A | Stabilize the collected skills (names, arguments, behavior); later changes are versioned | none | a committed catalogue; changes after it noted in `docs/journal.md` |
 | B | Collection (step 7): benches in series, 14B (successes) + small models (failures) + scripted scenarios | A | a few thousand varied transitions |
 | C | World model v1: supervised heads on the structured state | B | beats the trivial baselines (base rate, median) on unseen places |
 | D | World model as a filter (step 8) | C | small LLM + world model: better success and/or fewer calls than the small LLM alone |

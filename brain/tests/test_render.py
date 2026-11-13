@@ -57,3 +57,20 @@ def test_goal_and_state_messages_end_with_the_next_step_reminder():
     assert render.render_goal("wood", STATE).endswith(render.NEXT_STEP)
     assert render.render_new_state(STATE).endswith(render.NEXT_STEP)
 
+
+
+def test_directions_in_words_follow_the_game_north_is_minus_z_east_is_plus_x():
+    # The LLM is told where things are in words: an inversion would mislead it without any error
+    assert render._compass(0, -10) == "north"
+    assert render._compass(0, 10) == "south"
+    assert render._compass(10, 0) == "east"
+    assert render._compass(-10, 0) == "west"
+    assert render._compass(5, -5) == "north-east"
+    assert render._compass(-5, 5) == "south-west"
+    assert render._compass(1, -9) == "north"  # mostly north: no diagonal
+    assert render._compass(0.2, 0.3) == "here"
+
+
+def test_time_of_day_in_words():
+    assert [render._time_of_day(t) for t in (0, 11999, 12500, 18000, 23500, None)] == [
+        "day", "day", "dusk", "night", "dawn", "unknown time"]
