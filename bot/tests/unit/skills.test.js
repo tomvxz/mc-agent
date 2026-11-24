@@ -5,7 +5,7 @@ import test from "node:test";
 import prismarineRecipe from "prismarine-recipe";
 import skills from "../../src/skills/index.js";
 import { stepInto } from "../../src/skills/actions/dig.js";
-import { landingSpot } from "../../src/skills/utils.js";
+import { landingSpot, trackWorldChanges } from "../../src/skills/utils.js";
 import { fakeBot, Point, MC_VERSION } from "./fakeBot.js";
 
 // Check success + reason
@@ -694,9 +694,9 @@ test("collect_block = break_block (which no longer picks up) + pick_up", async (
 
 // Two logs one above the other, visible (the ray towards a face ends inside the target), and digging one
 // drops its item at its center
-function twoLogs() {
-  const blocks = { "2,100,0": "oak_log", "2,101,0": "oak_log" };
-  const bot = fakeBot({ blocks });
+function twoLogs(name = "oak_log", inventory = {}) {
+  const blocks = { "2,100,0": name, "2,101,0": name };
+  const bot = fakeBot({ blocks, inventory });
   bot.world = {
     raycast: (from, dir, range) => {
       const end = new Point(from.x + dir.x * range, from.y + dir.y * range, from.z + dir.z * range).floored();
@@ -706,7 +706,7 @@ function twoLogs() {
   let next = 20;
   bot.dig = async (b) => {
     delete blocks[`${b.position.x},${b.position.y},${b.position.z}`];
-    itemOnGround(bot, next++, "oak_log", 1, b.position.offset(0.5, 0, 0.5));
+    itemOnGround(bot, next++, name, 1, b.position.offset(0.5, 0, 0.5));
   };
   return bot;
 }
@@ -736,6 +736,41 @@ test("mine: a block broken whose item is picked up later counts as dug (not part
   };
   const r = await expectResult(skills.mine(bot, { block: "oak_log", count: 2 }), true, "ok");
   assert.deepStrictEqual([r.details.dug, r.details.collected, r.details.not_picked_up], [2, { oak_log: 2 }, 1]);
+});
+
+test("mine: says how many blocks the pathfinder placed on the way", async () => {
+  // Seen in the field (2026-11-13): mine climbed to logs with 5 dirt and reported nothing
+  const bot = twoLogs("oak_log", { dirt: 10 });
+  pickUpWhenWalking(bot);
+  const walk = bot.pathfinder.goto;
+  bot.pathfinder.goto = async (goal) => {
+    bot.inventory.items().find((i) => i.name === "dirt").count -= 2; // 2 dirt placed on each walk
+    return walk(goal);
+  };
+  const r = await expectResult(skills.mine(bot, { block: "oak_log", count: 2 }), true, "ok");
+  assert.strictEqual(r.details.blocks_placed, 4, JSON.stringify(r.details));
+  // Nothing placed: nothing said
+  const quiet = twoLogs();
+  pickUpWhenWalking(quiet);
+  const r2 = await expectResult(skills.mine(quiet, { block: "oak_log", count: 2 }), true, "ok");
+  assert.ok(!("blocks_placed" in r2.details));
+});
+
+test("trackWorldChanges: scaffolding picked up meanwhile does not hide the blocks placed", () => {
+  // Digging dirt while bridging with dirt: 3 placed, 2 picked up -> the inventory only lost 1
+  const bot = fakeBot({ inventory: { dirt: 10 } });
+  const stop = trackWorldChanges(bot);
+  const dirt = bot.inventory.items()[0];
+  dirt.count -= 3;
+  for (const id of [1, 2]) {
+    const item = itemOnGround(bot, id, "dirt", 1, new Point(0, 100, 0));
+    dirt.count += 1;
+    bot.emit("playerCollect", bot.entity, item);
+  }
+  bot.emit("playerCollect", { id: 99 }, itemOnGround(bot, 3, "dirt", 1, new Point(0, 100, 0))); // someone else
+  bot.emit("diggingCompleted");
+  assert.deepStrictEqual(stop(), { blocks_placed: 3, blocks_broken: 1 });
+  assert.strictEqual(bot.listenerCount("playerCollect"), 0); // listeners removed
 });
 
 test("collect_block: the item fell out of reach -> not_collected", async () => {

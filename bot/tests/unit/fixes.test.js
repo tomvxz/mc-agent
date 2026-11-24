@@ -2,7 +2,7 @@ import assert from "node:assert";
 import test from "node:test";
 import AABB from "prismarine-physics/lib/aabb.js";
 import { EventEmitter } from "node:events";
-import { fixCraftSync, fixStateId, fixWallContact, resyncWindow, SYNC_QUIET_MS, WALL_GAP } from "../../src/game/fixes.js";
+import { botOxygen, fixCraftSync, fixStateId, fixWallContact, resyncWindow, SYNC_QUIET_MS, WALL_GAP } from "../../src/game/fixes.js";
 
 test("fixWallContact: a horizontal move stops 1 mm before a block face, a vertical one does not", () => {
     fixWallContact();
@@ -93,4 +93,13 @@ test("fixStateId: each window's clicks carry that window's latest state id; -1 a
       ["block_dig", undefined, 99],
     ],
   );
+});
+
+test("botOxygen: the bot's own air supply, not the last entity's", () => {
+  // Mineflayer's bot.oxygenLevel follows ANY entity's air (here an axolotl's 6000 ticks -> 400)
+  const bot = { oxygenLevel: 400, entity: { metadata: { 0: 0, 1: 150 } } };
+  assert.strictEqual(botOxygen(bot), 10); // 150 ticks of air = half
+  assert.strictEqual(botOxygen({ entity: { metadata: { 1: 300 } } }), 20);
+  assert.strictEqual(botOxygen({ entity: { metadata: {} } }), null); // not sent yet
+  assert.strictEqual(botOxygen({}), null);
 });

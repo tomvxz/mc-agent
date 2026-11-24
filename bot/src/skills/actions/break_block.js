@@ -6,6 +6,7 @@ import {
     inventoryCounts,
     makeVec3,
     movementFailureReason,
+    trackWorldChanges,
     walkSeconds,
 } from "../utils.js";
 import { perceivesBlock } from "../../observation/perception.js";
@@ -163,9 +164,13 @@ async function break_block(bot, { x, y, z, require_tool = true } = {}) {
     const ready = () =>
         bot.canDigBlock(bot.blockAt(target)) && someFaceVisible(bot, target);
     let cleared = 0;
+    let placed = {}; // blocks the pathfinder placed on the way (dirt to climb or bridge)
     if (!ready()) {
+        const stopTracking = trackWorldChanges(bot);
         const view = await getInView(bot, target, ready);
         cleared = view.cleared;
+        const { blocks_placed } = stopTracking();
+        if (blocks_placed) placed = { blocks_placed };
         if (!ready()) {
             const e = view.moveError;
             return {
@@ -175,6 +180,7 @@ async function break_block(bot, { x, y, z, require_tool = true } = {}) {
                     position,
                     block: block.name,
                     cleared,
+                    ...placed,
                     error: e ? e.message : "cannot see the block",
                 },
             };
@@ -216,6 +222,7 @@ async function break_block(bot, { x, y, z, require_tool = true } = {}) {
             drops,
             collected: gainedSince(bot, before),
             ...(cleared && { cleared }),
+            ...placed,
             ...(noDrop && { no_drop: true }), // broken without the right tool: nothing could drop
         },
     };

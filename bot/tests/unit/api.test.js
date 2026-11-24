@@ -118,7 +118,7 @@ test("POST /execute runs the skill, returns the result and logs episode_id and t
   const line = lastLine();
   assert.deepStrictEqual(
     [line.schema_version, line.source, line.episode_id, line.turn],
-    [10, "brain", "ep-1", 1],
+    [11, "brain", "ep-1", 1],
   );
 });
 

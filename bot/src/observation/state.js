@@ -4,6 +4,7 @@
 // Every part is optional: if one cannot be read (e.g. biome unknown), it is null and the rest is
 // still there. Shape documented in docs/journal.md.
 
+import { botOxygen } from "../game/fixes.js";
 import { entityVisible, eyes, inSight, lookAround, perception, SIGHT_RADIUS, stateReader } from "./perception.js";
 
 // Hostile = the game data's category "Hostile mobs" (minecraft-data), not a list of ours. It also holds
@@ -218,7 +219,7 @@ function observe(bot) {
         food: bot.food,
         deaths: bot.deathCount ?? null, // since the bot process started
         food_saturation: attempt(() => bot.foodSaturation),
-        oxygen: attempt(() => bot.oxygenLevel),
+        oxygen: attempt(() => botOxygen(bot)), // not bot.oxygenLevel: a Mineflayer bug (fixes.js)
         xp_level: attempt(() => bot.experience.level),
         xp_points: attempt(() => bot.experience.points), // total
         xp_progress: attempt(() => r3(bot.experience.progress)), // 0-1 towards the next level

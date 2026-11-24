@@ -52,7 +52,7 @@ test("v9 line: minimal identity, times, args_resolved, result", async () => {
     turn: 0,
   });
   const d = last();
-  assert.strictEqual(d.schema_version, 10);
+  assert.strictEqual(d.schema_version, 11);
   assert.deepStrictEqual([d.source, d.episode_id, d.turn], ["unit", "ep-1", 0]);
   assert.strictEqual(typeof d.seq, "number");
   // Run-level facts are not repeated on every line (they are in runs.jsonl)

@@ -73,10 +73,10 @@ Written once per run, right after the bot spawns: the run's fixed facts, not rep
 
 ## `transitions.jsonl`
 
-### Version 10 (current)
+### Version 11 (current)
 ```jsonc
 {
-  "schema_version": 10,
+  "schema_version": 11,
   // --- Identity (everything else about the run is in runs.jsonl)
   "run_id": "run-…",                    // null when no run was started (unit tests)
   "seq": 17,                            // 0, 1, 2... within the run, given when the skill STARTS
@@ -139,7 +139,8 @@ mask over the same line, not a second format (`bot/src/observation/perception.js
   "on_ground": true, "in_water": false, "in_lava": false, "on_fire": false,
   "sneaking": false, "sprinting": false, "sleeping": false,   // from the keys held (the client decides)
   "fall_distance": 0,                   // blocks fallen since last on the ground or in a liquid (> 3: damage)
-  "health": 20, "food": 20, "food_saturation": 5, "oxygen": null,
+  "health": 20, "food": 20, "food_saturation": 5,
+  "oxygen": null,                       // air, 0-20 (20 = full), the bot's own (see v10 below)
   "xp_level": 0, "xp_points": 0, "xp_progress": 0,    // points: total; progress: 0-1 to the next level
   "deaths": 0,                          // deaths since the bot process started
   "effects": [{ "name": "Speed", "amplifier": 0, "duration": 600 }],
@@ -257,7 +258,13 @@ since the start of the skill.
 
 (`timed_out` is the one exception kept on purpose: it equals `reason == "timeout"` but makes filters readable.)
 
-### Earlier versions (October 2026, development data only)
+### Earlier versions
+v10 (2026-11-12 to 2026-11-16, the first trial collection): `state.oxygen` came from Mineflayer's
+`bot.oxygenLevel`, which follows the air of ANY entity nearby (a Mineflayer bug, see `botOxygen` in
+`bot/src/game/fixes.js`): values up to 400, and a value in 0-20 may be another entity's too. Read v10
+oxygen as unknown. `mine`, `collect_block` and `break_block` did not report `details.blocks_placed`
+(the trace's `blocks` and `actions` show them).
+Before (October 2026, development data only):
 v9 (2026-10-21 to 2026-10-25): `started_at` / `ended_at` were named `wall_start` / `wall_end`, and
 `next_state` came a fixed 300 ms after the skill (the same on a healthy server, shorter in ticks on a slow one),
 and the grid had radius 8 (17x17x17).

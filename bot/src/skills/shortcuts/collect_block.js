@@ -3,18 +3,22 @@
 import break_block from "../actions/break_block.js";
 import pick_up from "../actions/pick_up.js";
 import { step } from "../../execution/steps.js";
-import { gainedSince, inventoryCounts } from "../utils.js";
+import { gainedSince, inventoryCounts, trackWorldChanges } from "../utils.js";
 
 const PICK_UP_SECONDS = 3; // walking onto the drops, usually next to the block
 
 async function collect_block(bot, args = {}) {
     const before = inventoryCounts(bot);
+    const stopTracking = trackWorldChanges(bot); // blocks the pathfinder placed on the way
 
     // 1. Break it (break_block checks the arguments, walks there and reports what fell). Always with
     //    the right tool (require_tool's default): the promise here is to get the item
     const { x, y, z } = args;
     const broken = await step(bot, "break_block", break_block, { x, y, z });
-    if (!broken.success) return broken;
+    if (!broken.success) {
+        stopTracking();
+        return broken; // break_block's details already say what its walk placed
+    }
 
     // 2. Pick up what fell (by type; a drop of unknown type: pick up everything around)
     const { position, block, drops, cleared } = broken.details;
@@ -30,6 +34,8 @@ async function collect_block(bot, args = {}) {
         collected: gainedSince(bot, before),
         ...(cleared && { cleared }), // blocks broken only to see the target (break_block)
     };
+    const { blocks_placed } = stopTracking(); // the walk to the block AND onto its drops
+    if (blocks_placed) details.blocks_placed = blocks_placed;
     if (drops.length > 0 && Object.keys(details.collected).length === 0) {
         return { success: false, reason: "not_collected", details };
     }

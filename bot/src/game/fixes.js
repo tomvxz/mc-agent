@@ -153,4 +153,14 @@ function fixCraftSync(bot) {
     };
 }
 
-export { fixCraftSync, fixDifficulty, fixStateId, fixWallContact, resyncWindow, SYNC_QUIET_MS, WALL_GAP };
+/* Bug (Mineflayer 4.39): bot.oxygenLevel is set from the air supply of ANY entity whose metadata
+arrives (entities.js does not check that it is the bot), so a squid or an axolotl nearby changes it:
+the journal had values up to 400 for a 0-20 scale (2026-11-16).
+Fix: read the bot's OWN air supply (entity metadata 1, in ticks, 300 = full) and convert it like
+Mineflayer does (/ 15 -> 0-20). Not applied in bot.js: observe calls it. null until the server sends it. */
+function botOxygen(bot) {
+    const air = bot.entity?.metadata?.[1];
+    return Number.isFinite(air) ? Math.round(air / 15) : null;
+}
+
+export { botOxygen, fixCraftSync, fixDifficulty, fixStateId, fixWallContact, resyncWindow, SYNC_QUIET_MS, WALL_GAP };

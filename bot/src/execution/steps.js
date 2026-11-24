@@ -21,7 +21,9 @@ import { observe } from "../observation/state.js";
 // v10: wall_start / wall_end renamed started_at / ended_at (the clock times when the line starts and ends),
 // next_state 6 server ticks after the skill (was 300 ms: the same at 20 ticks/s), see execute.js; grid radius 16;
 // settle_ticks: how long after the skill next_state was observed (6 for a top line, 0 for a step).
-const SCHEMA_VERSION = 10;
+// v11: state.oxygen is the bot's own (v10 could hold another entity's air: up to 400); mine, collect_block
+// and break_block report details.blocks_placed.
+const SCHEMA_VERSION = 11;
 
 // Per bot: the next sequence number (0, 1, 2... per run)
 const sequences = new WeakMap();

@@ -145,21 +145,30 @@ function gainedSince(bot, before) {
 // Count the blocks placed and broken by the bot during a move
 // (the pathfinder pillars up, bridges and digs passages on its own).
 // Placed = scaffolding blocks consumed from the inventory (while moving, only the
-// pathfinder places any; Mineflayer's blockPlaced event is not always emitted).
+// pathfinder places any; Mineflayer's blockPlaced event is not always emitted). The scaffolding
+// items PICKED UP meanwhile are added back: otherwise mining dirt while bridging with dirt would hide
+// the blocks placed (seen 2026-11-13: mine used 5 dirt and reported nothing).
 function trackWorldChanges(bot) {
-    const scaffolding = () =>
-        SCAFFOLDING_BLOCKS.reduce(
-            (n, name) => n + (inventoryCounts(bot)[name] || 0),
-            0,
-        );
+    const scaffolding = () => {
+        const inv = inventoryCounts(bot);
+        return SCAFFOLDING_BLOCKS.reduce((n, name) => n + (inv[name] || 0), 0);
+    };
     const before = scaffolding();
     let broken = 0;
+    let pickedUp = 0;
     const onBroken = () => broken++;
+    const onCollect = (collector, collected) => {
+        if (collector !== bot.entity) return;
+        const item = droppedItem(collected);
+        if (item && SCAFFOLDING_BLOCKS.includes(item.name)) pickedUp += item.count;
+    };
     bot.on("diggingCompleted", onBroken);
+    bot.on("playerCollect", onCollect);
     return () => {
         bot.removeListener("diggingCompleted", onBroken);
+        bot.removeListener("playerCollect", onCollect);
         return {
-            blocks_placed: Math.max(0, before - scaffolding()),
+            blocks_placed: Math.max(0, before + pickedUp - scaffolding()),
             blocks_broken: broken,
         };
     };

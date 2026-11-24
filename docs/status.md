@@ -7,14 +7,16 @@ on a number, check its date and measure again if the code or the world changed s
 Rules and principles: `CLAUDE.md`. Target architecture and stages: `docs/architecture.md`.
 Update this file at the end of a work session (newest first in each section).
 
-## 1. Current state and next steps (2026-11-12)
+## 1. Current state and next steps (2026-11-13)
 
 ### Done
 - Skills: move_to, break_block, pick_up, place_block, craft, eat, find, scan, explore, collect_block, mine;
   questions recipe, craftable; underground dig, strip_mine; low level walk, look, press.
   Shown to the LLM: see `SHOWN_TO_LLM` (`bot/src/skills/catalogue.js`).
 - Agent loop with a goal condition, episode bench (`brain/bench.py`), field bench, arena.
-- Journal format v10 (`docs/journal.md`); it evolves by versions, it is never frozen (decided 2026-11-13).
+- World model, first base (2026-11-16): `brain/world_model/inputs/data_processing.py` (encoding of each variable: `inputs/variables.py`) (usable lines, 39 simple
+  features). Next: inventory tokens, in_sight, grid, the skill call, the targets.
+- Journal format v11 (`docs/journal.md`); it evolves by versions, it is never frozen (decided 2026-11-13).
 - `bot/src/` organized by role (2026-11-12): `api/`, `execution/`, `journal/`, `observation/`, `game/`, `skills/`.
 - Tests (2026-11-12): API contract shared by Node and Python (`docs/api_contract.json`); trace events;
   stop rules and perception in the arena (`too_long`, `timeout`, `alert`, a log behind a wall).
@@ -30,8 +32,10 @@ Update this file at the end of a work session (newest first in each section).
   at a table", and the new edge cases above.
 
 ### Next steps, in order
-1. `observe` made cheaper (2026-11-13, same outputs, see measurements): check in the game that the physics
-   ticks in bursts go back under 6 % (they were 14-15 % in v10).
+1. Trial collection done (2026-11-13, see measurements): the chain works end to end. To fix before the
+   real collection: the LLM looks only for `oak_log` in a spruce biome (goal = any planks). Fixed the same
+   day (unit tests, not run in the game): `mine`, `collect_block` and `break_block` now report
+   `details.blocks_placed` (scaffolding placed by the pathfinder), counted net of the scaffolding picked up.
 2. Prepare the collection for the world model (step 7): `MC_DATA_PURPOSE=collection`, benches in series
    (qwen2.5:14b for varied successes, small models for failures), then the first heads.
 3. Field bench: a free cell for place_block, then 50 places on a new seed. Longer tasks on the episode
@@ -41,6 +45,9 @@ Update this file at the end of a work session (newest first in each section).
 5. `brain/recovery.py` (rules), measured on the bench with / without.
 
 ### Small things waiting
+- `mine` checks what it collected on the NET inventory: mining dirt while the pathfinder bridges with dirt
+  can end in a false `not_collected` (found by a unit test 2026-11-13, not seen in the game). Count the
+  pickups instead.
 - `context_length` not recorded when Ollama has not loaded the model yet.
 - An unusable answer replayed identically (low temperature, fixed seed: the correction message changes nothing).
 - An `llm_error` (e.g. unknown model) counts as a place played on the bench.
@@ -54,6 +61,8 @@ Update this file at the end of a work session (newest first in each section).
 
 | Date | Code | What | Result |
 |---|---|---|---|
+| 2026-11-13 | 940419b | trial collection, field bench (41 min, `run-20261113-030804-0746`) | 839 lines (196 top), 0.24 GB/h, ~190 KB per line; bursts 4.2 %; no exception, no slow tick rate; 11 of 55 `mine` used dirt as scaffolding without reporting it |
+| 2026-11-13 | 940419b | trial collection, episode bench qwen2.5:14b (`run-20261113-035536-0ad5`) | crafting_table 9/10 (failure: max_turns, explored a snowy spruce biome looking only for oak_log), oak_logs 5/5; LLM latency median 29 s per turn (0.5 h of 0.6 h of episodes); every plan linked to its transitions; bursts 4.7 % |
 | 2026-11-13 | v10 | `observe` on a test world (open air, no server) | line of sight 133 -> 23 ms, grid radius 16: 25 -> 3 ms; outputs identical at 5 places, both perceptions |
 | 2026-11-13 | 0f40b16+dirty | arena craft, dig, mine, move_to, find | all nominal cases and edge cases pass (stop rules, a log behind a wall); bursts still 14 % (before the speed-up) |
 | 2026-11-12 | v10, uncommitted | arena, all suites | all pass except 3 bugs (dig fall, mine partial, craft after a table), fixed since, not re-run |
@@ -126,6 +135,10 @@ tuned for them: their failures are the reference the world model must improve (s
 
 ## 4. Root causes found (and fixed)
 
+- `state.oxygen` up to 400 on a 0-20 scale (2026-11-16, seen by the first world model features): Mineflayer
+  sets `bot.oxygenLevel` from the air of ANY entity (axolotl: 6000 ticks -> 400) -> `botOxygen` reads the
+  bot's own metadata (`bot/src/game/fixes.js`); journal v11, v10 oxygen read as unknown.
+
 - The bot froze against every wall: Mineflayer's physics put it EXACTLY against the face, Paper sent it back
   every tick -> `fixWallContact` (`bot/src/game/fixes.js`).
 - `not_collected`: not "the leaves" but a target that MOVES: aim where the item lands (`landingSpot`).
@@ -148,6 +161,13 @@ Overview and order of the stages: `docs/architecture.md`. Common rule: one compo
 / without on the benches; a learned component is ADDED (understand, predict, choose) and does not replace a
 reliable deterministic skill. Directions, not commitments: add and remove according to the data.
 
+- Outside data (discussed 2026-11-13, not for v1): VPT / MineRL are pixels + keyboard/mouse of humans
+  (older Minecraft versions), not (structured state, skill call) -> result: useful later for the low-level
+  controller (`walk`/`look`/`press`, same kind of actions) and the pixel stage, not for the skill world model.
+  Human play on our own server, recorded by a server plugin in our format with `source: human`: same state
+  format, events close to our primitives, but it describes a human's body, not our skills' costs and failures;
+  if tried, as extra data with a source input, measured with / without on unseen places. The volume lever for
+  v1 is several bots in parallel and more seeds / biomes.
 - Autonomy: triggers (hunger, health, full inventory, monster): a Node reflex interrupts the skill and wakes the
   brain with an alert message; a goal generator with Maslow-style priorities (survive > eat > shelter > tools >
   explore), written as DATA / rules the LLM uses; a long-term goal ("a castle") kept in memory.

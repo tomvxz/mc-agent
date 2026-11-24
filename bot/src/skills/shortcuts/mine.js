@@ -4,7 +4,7 @@ import { step } from "../../execution/steps.js";
 import { findBlockTag } from "../../game/tags.js";
 import collect_block from "./collect_block.js";
 import find from "../questions/find.js";
-import { gainedSince, inventoryCounts, walkSeconds } from "../utils.js";
+import { gainedSince, inventoryCounts, trackWorldChanges, walkSeconds } from "../utils.js";
 
 // Failures that only concern THIS block: try the next one
 const TRY_ANOTHER = [
@@ -41,6 +41,12 @@ async function mine(bot, { block, count = 1 } = {}) {
     let unreachable = 0;
     let not_picked_up = 0; // blocks broken whose item was not picked up right away
     let cleared = 0; // blocks broken only to see a target (leaves...): what the trip cost
+    // Blocks the pathfinder placed on the way (dirt to climb or bridge): also what the trip cost
+    const stopTracking = trackWorldChanges(bot);
+    const placed = () => {
+        const { blocks_placed } = stopTracking();
+        return blocks_placed ? { blocks_placed } : {};
+    };
 
     while (dug < count) {
         // 2. The nearest block not tried yet
@@ -60,6 +66,7 @@ async function mine(bot, { block, count = 1 } = {}) {
                     dug,
                     collected: gainedSince(bot, before),
                     unreachable,
+                    ...placed(),
                 },
             };
         }
@@ -92,6 +99,7 @@ async function mine(bot, { block, count = 1 } = {}) {
                     dug,
                     collected: gainedSince(bot, before),
                     ...r.details,
+                    ...placed(), // the whole call's, not only this block's
                 },
             };
         }
@@ -102,7 +110,13 @@ async function mine(bot, { block, count = 1 } = {}) {
         return {
             success: false,
             reason: "not_collected",
-            details: { dug, collected: gainedSince(bot, before), not_picked_up, ...(cleared && { cleared }) },
+            details: {
+                dug,
+                collected: gainedSince(bot, before),
+                not_picked_up,
+                ...(cleared && { cleared }),
+                ...placed(),
+            },
         };
     return {
         success: true,
@@ -113,6 +127,7 @@ async function mine(bot, { block, count = 1 } = {}) {
             unreachable,
             ...(not_picked_up && { not_picked_up }),
             ...(cleared && { cleared }),
+            ...placed(),
         },
     };
 }
