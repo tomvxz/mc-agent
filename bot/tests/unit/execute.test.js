@@ -7,268 +7,271 @@ import execute, { inventoryChange, settleMs } from "../../src/execution/execute.
 import { observe, trackDeaths } from "../../src/observation/state.js";
 import { fakeBot } from "./fakeBot.js";
 
-// Temporary journal: fake lines are never written to data/
-const file = path.join(
-  fs.mkdtempSync(path.join(os.tmpdir(), "mc-agent-")),
-  "transitions.jsonl",
-);
+// Temporary journal to prevent writing fake lines to data
+const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "mc-agent-")), "transitions.jsonl");
 process.env.TRANSITIONS_FILE = file;
 
 const lines = () =>
-  fs
-    .readFileSync(file, "utf8")
-    .trim()
-    .split("\n")
-    .map((l) => JSON.parse(l));
+    fs
+        .readFileSync(file, "utf8")
+        .trim()
+        .split("\n")
+        .map((l) => JSON.parse(l));
 const last = () => lines().at(-1);
 
 test("an unknown name fails AND is logged", async () => {
-  const r = await execute(fakeBot(), "fly", {}, "unit");
-  assert.deepStrictEqual([r.success, r.reason], [false, "unknown_skill"]);
-  const d = last();
-  assert.strictEqual(d.reason, "unknown_skill");
-  assert.strictEqual(d.skill.name, "fly");
-  assert.deepStrictEqual(d.state, d.next_state);
-  assert.strictEqual(d.trace, null);
+    const r = await execute(fakeBot(), "fly", {}, "unit");
+    assert.deepStrictEqual([r.success, r.reason], [false, "unknown_skill"]);
+    const d = last();
+    assert.strictEqual(d.reason, "unknown_skill");
+    assert.strictEqual(d.skill.name, "fly");
+    assert.deepStrictEqual(d.state, d.next_state);
+    assert.strictEqual(d.trace, null);
 });
 
 test('a name inherited from JavaScript ("constructor") is not a skill', async () => {
-  const r = await execute(fakeBot(), "constructor", {}, "unit");
-  assert.strictEqual(r.reason, "unknown_skill");
+    const r = await execute(fakeBot(), "constructor", {}, "unit");
+    assert.strictEqual(r.reason, "unknown_skill");
 });
 
 test("if observe throws (bot disconnected), the transition is still written with state null", async () => {
-  const bot = fakeBot();
-  bot.entity = undefined;
-  await execute(bot, "mine", { block: "no_such_block" }, "unit");
-  const d = last();
-  assert.strictEqual(d.state, null);
-  assert.strictEqual(d.reason, "unknown_block");
+    const bot = fakeBot();
+    bot.entity = undefined;
+    await execute(bot, "mine", { block: "no_such_block" }, "unit");
+    const d = last();
+    assert.strictEqual(d.state, null);
+    assert.strictEqual(d.reason, "unknown_block");
 });
 
 test("v9 line: minimal identity, times, args_resolved, result", async () => {
-  await execute(fakeBot(), "find", { target: "oak_log" }, "unit", {
-    episode_id: "ep-1",
-    turn: 0,
-  });
-  const d = last();
-  assert.strictEqual(d.schema_version, 11);
-  assert.deepStrictEqual([d.source, d.episode_id, d.turn], ["unit", "ep-1", 0]);
-  assert.strictEqual(typeof d.seq, "number");
-  // Run-level facts are not repeated on every line (they are in runs.jsonl)
-  for (const field of [
-    "code_version",
-    "catalogue_version",
-    "skill_version",
-    "world_id",
-    "bot",
-    "tick_rate",
-    "scenario",
-    "step",
-    "id",
-    "prev_id",
-  ]) {
-    assert.ok(!(field in d), `${field} should not be on the line`);
-  }
-  assert.deepStrictEqual([d.tick_start, d.tick_end], [5000, 5000]);
-  assert.ok(Date.parse(d.ended_at) >= Date.parse(d.started_at));
-  assert.deepStrictEqual(d.skill.args_resolved, {
-    target: "oak_log",
-    count: 5,
-    max_distance: 64,
-  }); // defaults applied
-  assert.deepStrictEqual(d.details, { target: "oak_log", max_distance: 64, perception: "sight" }); // details of not_found
-  // Removed in v6 (only useful to the future world model)
-  for (const field of [
-    "context",
-    "continuous",
-    "discontinuities",
-    "interventions",
-    "interventions_before",
-    "trace_before",
-  ]) {
-    assert.ok(!(field in d), `${field} should not be on the line`);
-  }
-  assert.deepStrictEqual([d.timed_out, d.error], [false, null]);
-  assert.strictEqual(d.settle_ticks, 6); // next_state observed 6 server ticks after the skill
+    await execute(fakeBot(), "find", { target: "oak_log" }, "unit", {
+        episode_id: "ep-1",
+        turn: 0,
+    });
+    const d = last();
+    assert.strictEqual(d.schema_version, 11);
+    assert.deepStrictEqual([d.source, d.episode_id, d.turn], ["unit", "ep-1", 0]);
+    assert.strictEqual(typeof d.seq, "number");
+    // Run-level facts are not repeated on every line (they are in runs.jsonl)
+    for (const field of [
+        "code_version",
+        "catalogue_version",
+        "skill_version",
+        "world_id",
+        "bot",
+        "tick_rate",
+        "scenario",
+        "step",
+        "id",
+        "prev_id",
+    ]) {
+        assert.ok(!(field in d), `${field} should not be on the line`);
+    }
+    assert.deepStrictEqual([d.tick_start, d.tick_end], [5000, 5000]);
+    assert.ok(Date.parse(d.ended_at) >= Date.parse(d.started_at));
+    assert.deepStrictEqual(d.skill.args_resolved, {
+        target: "oak_log",
+        count: 5,
+        max_distance: 64,
+    }); // defaults applied
+    assert.deepStrictEqual(d.details, { target: "oak_log", max_distance: 64, perception: "sight" }); // details of not_found
+    // Removed in v6 (only useful to the future world model)
+    for (const field of [
+        "context",
+        "continuous",
+        "discontinuities",
+        "interventions",
+        "interventions_before",
+        "trace_before",
+    ]) {
+        assert.ok(!(field in d), `${field} should not be on the line`);
+    }
+    assert.deepStrictEqual([d.timed_out, d.error], [false, null]);
+    assert.strictEqual(d.settle_ticks, 6); // next_state observed 6 server ticks after the skill
 });
 
 test("state and next_state share one full format (observe), with a 33x33x33 grid", async () => {
-  await execute(fakeBot({ inventory: { bread: 2 } }), "scan", {}, "unit");
-  const d = last();
-  for (const s of [d.state, d.next_state]) {
-    assert.strictEqual(s.blocks.cells.length, 35937);
-    assert.deepStrictEqual(s.blocks.palette, ["air"]);
-    assert.deepStrictEqual(s.inventory, { bread: 2 });
-    assert.strictEqual(s.difficulty, "easy");
-  }
+    await execute(fakeBot({ inventory: { bread: 2 } }), "scan", {}, "unit");
+    const d = last();
+    for (const s of [d.state, d.next_state]) {
+        assert.strictEqual(s.blocks.cells.length, 35937);
+        assert.deepStrictEqual(s.blocks.palette, ["air"]);
+        assert.deepStrictEqual(s.inventory, { bread: 2 });
+        assert.strictEqual(s.difficulty, "easy");
+    }
 });
 
 test("seq increases per bot", async () => {
-  const bot = fakeBot();
-  await execute(bot, "scan", {}, "unit");
-  const first = last();
-  await execute(bot, "scan", {}, "unit");
-  assert.strictEqual(last().seq, first.seq + 1);
+    const bot = fakeBot();
+    await execute(bot, "scan", {}, "unit");
+    const first = last();
+    await execute(bot, "scan", {}, "unit");
+    assert.strictEqual(last().seq, first.seq + 1);
 });
 
 test("the trace records body + keys, actions, block changes, entities and events", async () => {
-  const bot = fakeBot();
-  bot.entity.id = 7;
-  bot.entity.yaw = 0;
-  bot.entity.pitch = 0;
-  bot.entity.velocity = { x: 0, y: 0, z: 0 };
-  bot.entity.onGround = true;
-  bot.controlState = { forward: true, jump: true };
-  bot.entities = {
-    3: {
-      id: 3,
-      name: "zombie",
-      type: "hostile",
-      position: bot.entity.position.offset(2, 0, 0),
-    },
-  };
-  const air = {
-    type: 0,
-    name: "air",
-    position: bot.entity.position.floored().offset(1, 0, 0),
-  };
-  const dirt = { type: 10, name: "dirt", position: air.position };
-  bot.pathfinder.goto = async () => {
-    bot.emit("physicsTick");
-    bot._client.write("block_dig", {
-      status: 0,
-      location: { x: 1, y: 100, z: 0 },
-      face: 1,
-    });
-    bot._client.write("position", { x: 0, y: 0, z: 0 }); // a movement packet: not an action
-    bot.emit("blockUpdate", air, dirt);
-    bot._client.emit("damage_event", {
-      entityId: 7,
-      sourceTypeId: 12,
-      sourceCauseId: 4,
-    });
-    bot.health = 14;
-    bot.emit("health");
-  };
-  await execute(bot, "move_to", { x: 0.5, y: 100, z: 0.5 }, "unit");
-  const t = last().trace;
-  assert.strictEqual(t.body.fields.at(-1), "controls");
-  assert.strictEqual(t.body.rows[0].at(-1), 0b10001); // forward (bit 0) + jump (bit 4)
-  assert.deepStrictEqual(
-    t.actions.map((a) => a.packet),
-    ["block_dig"],
-  );
-  assert.deepStrictEqual(t.actions[0].location, [1, 100, 0]);
-  assert.deepStrictEqual(t.blocks.rows[0].slice(1), [1, 100, 0, "air", "dirt"]);
-  assert.strictEqual(t.entities.rows[0][2], "zombie");
-  assert.deepStrictEqual(
-    t.events.map((e) => e.type),
-    ["damage", "health_loss"],
-  );
-  assert.strictEqual(t.events[0].source, "zombie");
-  assert.strictEqual(t.events[1].amount, 6);
-  assert.deepStrictEqual(t.truncated, []);
+    const bot = fakeBot();
+    bot.entity.id = 7;
+    bot.entity.yaw = 0;
+    bot.entity.pitch = 0;
+    bot.entity.velocity = { x: 0, y: 0, z: 0 };
+    bot.entity.onGround = true;
+    bot.controlState = { forward: true, jump: true };
+    bot.entities = {
+        3: {
+            id: 3,
+            name: "zombie",
+            type: "hostile",
+            position: bot.entity.position.offset(2, 0, 0),
+        },
+    };
+    const air = {
+        type: 0,
+        name: "air",
+        position: bot.entity.position.floored().offset(1, 0, 0),
+    };
+    const dirt = { type: 10, name: "dirt", position: air.position };
+    bot.pathfinder.goto = async () => {
+        bot.emit("physicsTick");
+        bot._client.write("block_dig", {
+            status: 0,
+            location: { x: 1, y: 100, z: 0 },
+            face: 1,
+        });
+        bot._client.write("position", { x: 0, y: 0, z: 0 }); // a movement packet: not an action
+        bot.emit("blockUpdate", air, dirt);
+        bot._client.emit("damage_event", {
+            entityId: 7,
+            sourceTypeId: 12,
+            sourceCauseId: 4,
+        });
+        bot.health = 14;
+        bot.emit("health");
+    };
+    await execute(bot, "move_to", { x: 0.5, y: 100, z: 0.5 }, "unit");
+    const t = last().trace;
+    assert.strictEqual(t.body.fields.at(-1), "controls");
+    assert.strictEqual(t.body.rows[0].at(-1), 0b10001); // forward (bit 0) + jump (bit 4)
+    assert.deepStrictEqual(
+        t.actions.map((a) => a.packet),
+        ["block_dig"],
+    );
+    assert.deepStrictEqual(t.actions[0].location, [1, 100, 0]);
+    assert.deepStrictEqual(t.blocks.rows[0].slice(1), [1, 100, 0, "air", "dirt"]);
+    assert.strictEqual(t.entities.rows[0][2], "zombie");
+    assert.deepStrictEqual(
+        t.events.map((e) => e.type),
+        ["damage", "health_loss"],
+    );
+    assert.strictEqual(t.events[0].source, "zombie");
+    assert.strictEqual(t.events[1].amount, 6);
+    assert.deepStrictEqual(t.truncated, []);
 });
 
 test('a small server correction is a "correction" event', async () => {
-  const bot = fakeBot();
-  bot.entity.velocity = { x: 0, y: 0, z: 0 };
-  bot.pathfinder.goto = async () => {
-    bot.emit("physicsTick"); // a body row at the current position
-    bot.entity.position = bot.entity.position.offset(0.3, 0, 0); // the server nudges the bot
-    bot.emit("forcedMove");
-  };
-  await execute(bot, "move_to", { x: 0.5, y: 100, z: 0.5 }, "unit");
-  const d = last();
-  assert.deepStrictEqual(
-    d.trace.events.map((e) => [e.type, e.distance]),
-    [["correction", 0.3]],
-  );
+    const bot = fakeBot();
+    bot.entity.velocity = { x: 0, y: 0, z: 0 };
+    bot.pathfinder.goto = async () => {
+        bot.emit("physicsTick"); // a body row at the current position
+        bot.entity.position = bot.entity.position.offset(0.3, 0, 0); // the server nudges the bot
+        bot.emit("forcedMove");
+    };
+    await execute(bot, "move_to", { x: 0.5, y: 100, z: 0.5 }, "unit");
+    const d = last();
+    assert.deepStrictEqual(
+        d.trace.events.map((e) => [e.type, e.distance]),
+        [["correction", 0.3]],
+    );
 });
 
 test("a teleport or a death during the skill are events of the trace", async () => {
-  const bot = fakeBot();
-  bot.pathfinder.goto = async () => {
-    bot.emit("forcedMove");
-    bot.emit("death");
-  };
-  await execute(bot, "move_to", { x: 0.5, y: 100, z: 0.5 }, "unit");
-  const d = last();
-  assert.deepStrictEqual(
-    d.trace.events.map((e) => e.type),
-    ["teleport", "death"],
-  );
+    const bot = fakeBot();
+    bot.pathfinder.goto = async () => {
+        bot.emit("forcedMove");
+        bot.emit("death");
+    };
+    await execute(bot, "move_to", { x: 0.5, y: 100, z: 0.5 }, "unit");
+    const d = last();
+    assert.deepStrictEqual(
+        d.trace.events.map((e) => e.type),
+        ["teleport", "death"],
+    );
 });
 
 test("lines without meta do not carry episode fields", async () => {
-  await execute(fakeBot(), "scan", {}, "unit");
-  const d = last();
-  for (const field of ["episode_id", "turn"]) assert.ok(!(field in d), field);
+    await execute(fakeBot(), "scan", {}, "unit");
+    const d = last();
+    for (const field of ["episode_id", "turn"]) assert.ok(!(field in d), field);
 });
 
 test("the brain gets a short summary of the trace: damage taken, death", async () => {
-  const bot = fakeBot();
-  bot.pathfinder.goto = async () => {
-    bot.health = 12;
-    bot.emit("health");
-    bot.emit("death");
-  };
-  const r = await execute(bot, "move_to", { x: 0.5, y: 100, z: 0.5 }, "unit");
-  assert.deepStrictEqual(r.body_events, { damage_taken: 8, died: true });
-  assert.ok(!("error" in r)); // the error details stay in the journal
+    const bot = fakeBot();
+    bot.pathfinder.goto = async () => {
+        bot.health = 12;
+        bot.emit("health");
+        bot.emit("death");
+    };
+    const r = await execute(bot, "move_to", { x: 0.5, y: 100, z: 0.5 }, "unit");
+    assert.deepStrictEqual(r.body_events, { damage_taken: 8, died: true });
+    assert.ok(!("error" in r)); // the error details stay in the journal
 });
 
 test("the state counts deaths (trackDeaths)", async () => {
-  const bot = fakeBot();
-  trackDeaths(bot);
-  bot.emit("death");
-  assert.strictEqual(observe(bot).deaths, 1);
+    const bot = fakeBot();
+    trackDeaths(bot);
+    bot.emit("death");
+    assert.strictEqual(observe(bot).deaths, 1);
 });
 
 test("a timeout tells the brain what changed in the inventory (computed, not logged)", () => {
-  const before = { inventory: { oak_log: 4, dirt: 2 } };
-  const after = { inventory: { oak_log: 12, bamboo: 69 } };
-  assert.deepStrictEqual(inventoryChange(before, after), { oak_log: 8, dirt: -2, bamboo: 69 });
-  assert.deepStrictEqual(inventoryChange(null, after), { oak_log: 12, bamboo: 69 });
+    const before = { inventory: { oak_log: 4, dirt: 2 } };
+    const after = { inventory: { oak_log: 12, bamboo: 69 } };
+    assert.deepStrictEqual(inventoryChange(before, after), { oak_log: 8, dirt: -2, bamboo: 69 });
+    assert.deepStrictEqual(inventoryChange(null, after), { oak_log: 12, bamboo: 69 });
 });
 
 test("the steps inside a shortcut get their own lines, linked by parent_seq, without a trace", async () => {
-  // collect_block on nothing: its break_block step fails (nothing_to_break), and so does it
-  const bot = fakeBot();
-  await execute(bot, "collect_block", { x: 1, y: 100, z: 0 }, "unit", { episode_id: "ep-2", turn: 3 });
-  const [stepLine, top] = lines().slice(-2); // the step ends first, so it is written first
-  assert.deepStrictEqual(
-    [top.skill.name, top.reason, top.parent_seq],
-    ["collect_block", "nothing_to_break", undefined],
-  );
-  assert.deepStrictEqual(
-    [stepLine.skill.name, stepLine.reason, stepLine.parent_seq, stepLine.trace],
-    ["break_block", "nothing_to_break", top.seq, null],
-  );
-  assert.ok(stepLine.seq > top.seq); // seq is given at the start
-  assert.deepStrictEqual([stepLine.settle_ticks, top.settle_ticks], [0, 6]); // no wait after a step
-  assert.deepStrictEqual([stepLine.episode_id, stepLine.turn, stepLine.source], ["ep-2", 3, "unit"]);
-  // Its duration is the step itself, inside its wall time (v8 counted the observations too)
-  const span = (Date.parse(stepLine.ended_at) - Date.parse(stepLine.started_at)) / 1000;
-  assert.ok(stepLine.duration <= span + 0.001, `${stepLine.duration} > ${span}`);
+    // collect_block on nothing: its break_block step fails (nothing_to_break), and so does it
+    const bot = fakeBot();
+    await execute(bot, "collect_block", { x: 1, y: 100, z: 0 }, "unit", {
+        episode_id: "ep-2",
+        turn: 3,
+    });
+    const [stepLine, top] = lines().slice(-2); // the step ends first, so it is written first
+    assert.deepStrictEqual(
+        [top.skill.name, top.reason, top.parent_seq],
+        ["collect_block", "nothing_to_break", undefined],
+    );
+    assert.deepStrictEqual(
+        [stepLine.skill.name, stepLine.reason, stepLine.parent_seq, stepLine.trace],
+        ["break_block", "nothing_to_break", top.seq, null],
+    );
+    assert.ok(stepLine.seq > top.seq); // seq is given at the start
+    assert.deepStrictEqual([stepLine.settle_ticks, top.settle_ticks], [0, 6]); // no wait after a step
+    assert.deepStrictEqual(
+        [stepLine.episode_id, stepLine.turn, stepLine.source],
+        ["ep-2", 3, "unit"],
+    );
+    // Its duration is the step itself, inside its wall time (v8 counted the observations too)
+    const span = (Date.parse(stepLine.ended_at) - Date.parse(stepLine.started_at)) / 1000;
+    assert.ok(stepLine.duration <= span + 0.001, `${stepLine.duration} > ${span}`);
 });
 
 test("the wait before next_state is 6 ticks at the measured tick rate, at most 2 s", (t) => {
-  const bot = fakeBot();
-  let now = 1_000_000;
-  t.mock.method(Date, "now", () => now);
-  assert.strictEqual(settleMs(bot), 300); // nothing measured yet: 20 ticks/s
-  const update = (age, ms) => {
-    now += ms;
-    bot.time.age = age;
-    bot.emit("time");
-  };
-  update(5000, 0);
-  update(5020, 1000);
-  assert.strictEqual(settleMs(bot), 300); // healthy server
-  update(5030, 1000);
-  assert.strictEqual(settleMs(bot), 600); // 10 ticks/s: twice as long
-  update(5031, 1000);
-  assert.strictEqual(settleMs(bot), 2000); // 1 tick/s: capped
+    const bot = fakeBot();
+    let now = 1_000_000;
+    t.mock.method(Date, "now", () => now);
+    assert.strictEqual(settleMs(bot), 300); // nothing measured yet: 20 ticks/s
+    const update = (age, ms) => {
+        now += ms;
+        bot.time.age = age;
+        bot.emit("time");
+    };
+    update(5000, 0);
+    update(5020, 1000);
+    assert.strictEqual(settleMs(bot), 300); // healthy server
+    update(5030, 1000);
+    assert.strictEqual(settleMs(bot), 600); // 10 ticks/s: twice as long
+    update(5031, 1000);
+    assert.strictEqual(settleMs(bot), 2000); // 1 tick/s: capped
 });
