@@ -1,14 +1,12 @@
-import { startSkill } from "./cancel.js";
 import { isHostile } from "../observation/state.js";
+import { startSkill } from "./cancel.js";
 
 // Stopping time for skills : HARD cap, no longer PROGRESSING, TIME CAP defined by the skill, ALERT for the brain
 const HARD_CAP_S = 300; // against bugs only
 
-/*
-Budget: a skill may estimate its duration from game facts, skill.budget(bot, args) -> seconds
-It is stopped at BUDGET_FACTOR * the estimate + margin
- one whose stop time would pass the hard cap is refused before starting (too_long).
- */
+// Budget: a skill may estimate its duration from game facts, skill.budget(bot, args) -> seconds
+// It is stopped at BUDGET_FACTOR * the estimate + margin
+// one whose stop time would pass the hard cap is refused before starting (too_long).
 const BUDGET_FACTOR = 3;
 const BUDGET_MARGIN_S = 10;
 const DEFAULT_BUDGET_S = 60; // a skill without an estimate
@@ -36,8 +34,8 @@ function stopAfter(bot, skill, args) {
     return { estimate: null, seconds: DEFAULT_BUDGET_S };
 }
 
-/* What counts as progress: a real move (half a block horizontally, or a climb: jumping in place is
-not), the inventory changing, digging or pillaring */
+// What counts as progress: a real move (half a block horizontally, or a climb: jumping in place is
+// not), the inventory changing, digging or pillaring
 function progressWatcher(bot) {
     const inventory = () =>
         bot.inventory
@@ -64,11 +62,11 @@ function progressWatcher(bot) {
     };
 }
 
-/* An alert, or null. The watcher is made once when the skill starts and returns the check, called every
- CHECK_MS; each check compares the bot with the PREVIOUS check (not with the start):
- - damage: health went down since the previous check;
- - hostile_near: a monster is close that was not close at the previous check. One already close when the
-   skill starts does not count while it stays close */
+// An alert, or null. The watcher is made once when the skill starts and returns the check, called every
+//  CHECK_MS; each check compares the bot with the PREVIOUS check:
+//  - damage: health went down since the previous check;
+//  - hostile_near: a monster is close that was not close at the previous check. One already close when the
+//    skill starts does not count while it stays close
 function alertWatcher(bot) {
     const near = () =>
         Object.values(bot.entities).filter(
@@ -117,8 +115,7 @@ async function runSkill(bot, skill, args, limits = {}) {
         };
     const brainLimit = maxSeconds !== undefined ? maxSeconds + grace : Infinity;
 
-    // 2. Its budget, before starting: refuse a skill that plans to last longer than the hard cap. A
-    //    max_seconds shorter than the budget is the brain accepting to stop it early: not too long
+    // 2. Its budget, before starting: refuse a skill that plans to last longer than the hard cap.
     const budget = stopAfter(bot, skill, args);
     const budgetLimit =
         budget.estimate !== null
@@ -197,7 +194,6 @@ async function runSkill(bot, skill, args, limits = {}) {
                   success: false,
                   reason: "exception",
                   details: { error: e.message },
-                  // The full error, for debugging and for the journal
                   error: {
                       type: e.name,
                       message: e.message,
@@ -206,8 +202,7 @@ async function runSkill(bot, skill, args, limits = {}) {
               };
         // from now on, the skill's actions are refused (it may still be running)
         running.cancel();
-        // setGoal(null) stops immediately; stop() waited for the next block
-        // and made the following skill fail (instant no_path)
+        // setGoal(null) stops immediately;
         bot.pathfinder.setGoal(null);
         bot.stopDigging();
         // Release the keys: a skill stopped while holding "forward" (e.g. walking onto an item)
