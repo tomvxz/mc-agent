@@ -2,12 +2,13 @@
 // state before -> skill -> state after -> one line in transitions.jsonl.
 // Always call execute to get trace of it in logs
 
+import { logTransition } from "../journal/logger.js";
 import { startTrace, summarizeForBrain } from "../journal/trace.js";
 import { observe } from "../observation/state.js";
 import { resolveArgs } from "../skills/catalogue.js";
 import skills from "../skills/index.js";
 import runSkill, { STOP_REASONS } from "./runSkill.js";
-import { current, nextSeq, safe, writeLine } from "./steps.js";
+import { current, nextSeq, safe } from "./steps.js";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -73,7 +74,7 @@ async function execute(bot, name, args = {}, source = "manual", meta = {}) {
     }
 
     // 3. Write the line
-    writeLine({
+    logTransition({
         seq,
         source,
         // Only for a call from an LLM episode
