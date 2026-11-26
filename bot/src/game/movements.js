@@ -4,7 +4,7 @@ import { blockTag } from "./tags.js";
 const { Movements } = mineflayerPathfinder;
 
 // Pathfinder movement settings.
-// Principle: the LLM decides WHERE to go, the pathfinder decides HOW to get past obstacles
+// Principle: the model decides WHERE to go, the pathfinder decides HOW to get past obstacles
 // (jump, dig, pillar up, open a door). We add instincts so that these abilities do not kill
 // the bot or break things that matter.
 
@@ -20,10 +20,7 @@ class NoCornerCutMovements extends Movements {
             [0, dir.z],
         ]) {
             // Feet and head must fit on each side
-            if (
-                !this.getBlock(node, dx, y, dz).safe ||
-                !this.getBlock(node, dx, y + 1, dz).safe
-            )
+            if (!this.getBlock(node, dx, y, dz).safe || !this.getBlock(node, dx, y + 1, dz).safe)
                 return;
         }
         super.getMoveDiagonal(node, dir, neighbors);
@@ -31,13 +28,7 @@ class NoCornerCutMovements extends Movements {
 }
 
 // Blocks never to walk through (lava, fire and cobwebs are already avoided by default)
-const AVOID = [
-    "soul_fire",
-    "cactus",
-    "sweet_berry_bush",
-    "powder_snow",
-    "wither_rose",
-];
+const AVOID = ["soul_fire", "cactus", "sweet_berry_bush", "powder_snow", "wither_rose"];
 // Blocks never to stand on (they burn)
 const DANGEROUS_FLOOR = ["magma_block", "campfire", "soul_campfire"];
 // Useful blocks never to break on the way: our choice, not a game fact
@@ -55,12 +46,7 @@ const PROTECTED = [
     "enchanting_table",
 ];
 // "Throwaway" blocks the pathfinder may place to pillar up or bridge
-const SCAFFOLDING_BLOCKS = [
-    "dirt",
-    "cobblestone",
-    "cobbled_deepslate",
-    "netherrack",
-];
+const SCAFFOLDING_BLOCKS = ["dirt", "cobblestone", "cobbled_deepslate", "netherrack"];
 
 const MAX_DROP_DOWN = 3; // no fall higher than this (no damage): also the low-level skills' instinct
 const HOSTILE_DISTANCE = 4; // cells closer than this to a monster cost more
@@ -88,9 +74,7 @@ function create(bot) {
     for (const n of PROTECTED) m.blocksCantBreak.add(r.blocksByName[n].id);
     for (const tag of ["beds", "doors", "fence_gates"])
         for (const id of blockTag(bot, tag)) m.blocksCantBreak.add(id);
-    const dangerousFloor = new Set(
-        DANGEROUS_FLOOR.map((n) => r.blocksByName[n].id),
-    );
+    const dangerousFloor = new Set(DANGEROUS_FLOOR.map((n) => r.blocksByName[n].id));
 
     // Monster positions, recomputed at most once per second (the pathfinder calls this
     // function for every cell it considers: it has to be fast)

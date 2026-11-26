@@ -1,5 +1,4 @@
-// Fixes for Mineflayer bugs, applied once in bot.js.
-// We never edit node_modules (versions are pinned): we fix things from our own code.
+// Fixes for current Mineflayer bugs, applied once in bot.js.
 
 import AABB from "prismarine-physics/lib/aabb.js"; // the physics' collision box class (same instance as Mineflayer's)
 
@@ -163,4 +162,13 @@ function botOxygen(bot) {
     return Number.isFinite(air) ? Math.round(air / 15) : null;
 }
 
-export { botOxygen, fixCraftSync, fixDifficulty, fixStateId, fixWallContact, resyncWindow, SYNC_QUIET_MS, WALL_GAP };
+export {
+    botOxygen,
+    fixCraftSync,
+    fixDifficulty,
+    fixStateId,
+    fixWallContact,
+    resyncWindow,
+    SYNC_QUIET_MS,
+    WALL_GAP,
+};
