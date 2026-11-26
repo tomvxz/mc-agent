@@ -1,25 +1,24 @@
 // Field bench: measure the skills in the REAL world, not in the arena.
 // Usage: node --env-file=../.env bot.js field [locations=30] [seed=1] [only=index]
-//
+
 // The bot is sent to random natural locations (always the same ones for a given seed; one without
 // safe ground, e.g. ocean, is replaced by the next draw) and does
 // the same simple tasks at each: place a block, walk 20-40 blocks, gather 3 logs, explore.
 // The report gives the success rate and, above all, WHY the failures happened: we fix the most
-// frequent cause first, then run the same seed again to compare. Hand-made arena cases only
-// test what we thought of; this bench finds what we did not think of.
+// frequent cause first, then run the same seed again to compare.
 // Everything goes through execute() with source "test:field" (dev data, never for training).
 
-import execute from "../../src/execution/execute.js";
 import { setupPlace } from "../../src/api/setup.js";
+import execute from "../../src/execution/execute.js";
 import { inBlockTag } from "../../src/game/tags.js";
 import { drawLocations, summarize } from "./plan.js";
 
 const LIQUIDS = ["water", "lava"];
 const at = (bot, x, y, z) => bot.blockAt(bot.entity.position.clone().set(x, y, z));
 
-// A place where the bot can stand in column (x, z): solid ground that is not leaves (a tree top is not
+// Place where the bot can stand in column: solid ground that is not leaves (a tree top is not
 // ground: seen, a place_block cell 17 blocks above the bot), 2 free blocks above (air or what the game
-// replaces: grass...), no liquid. Searched from `reach` blocks above the bot down to `reach` below.
+// replaces: grass...), no liquid.
 // null if none (or not loaded).
 function standingSpot(bot, x, z, reach = 20) {
     const top = Math.floor(bot.entity.position.y) + reach;
