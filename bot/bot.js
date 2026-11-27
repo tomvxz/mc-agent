@@ -4,9 +4,9 @@ import { startApi } from "./src/api/api.js";
 import { runCommand } from "./src/game/commands.js";
 import { fixCraftSync, fixDifficulty, fixStateId, fixWallContact } from "./src/game/fixes.js";
 import { getMovements } from "./src/game/movements.js";
+import { recordTags } from "./src/game/tags.js";
 import { startRun, watchLogin } from "./src/journal/run.js";
 import { trackDeaths, trackFall } from "./src/observation/state.js";
-import { recordTags } from "./src/game/tags.js";
 const { pathfinder } = mineflayerPathfinder;
 
 const host = process.env.MC_HOST || "localhost";
@@ -81,12 +81,7 @@ bot.once("spawn", async () => {
         // Field bench in the real world: node --env-file=../.env bot.js field [locations] [seed] [only]
         try {
             const { default: runField } = await import("./tests/field/run.js");
-            await runField(
-                bot,
-                process.argv[3],
-                process.argv[4],
-                process.argv[5],
-            );
+            await runField(bot, process.argv[3], process.argv[4], process.argv[5]);
         } catch (e) {
             console.error("[field] error:", e);
         }
