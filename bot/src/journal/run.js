@@ -1,10 +1,9 @@
 // A "run" = one launch of the bot process. Every journal line carries its run_id, and the run's
 // fixed facts (versions, world seed, server settings) are written ONCE in runs.jsonl.
-//
+
 // Purpose (env MC_DATA_PURPOSE):
 //   dev        (default) everything we produce while building the bot: data/dev/      -> disposable
 //   collection a real data-collection run:                         data/collection/<run_id>/
-// so development data is never mixed with collection data.
 
 import pathfinderPackage from "mineflayer-pathfinder/package.json" with { type: "json" };
 import mineflayerPackage from "mineflayer/package.json" with { type: "json" };
@@ -20,18 +19,11 @@ const RUN_SCHEMA_VERSION = 1;
 let current = null; // the current run, or null (unit tests run without one)
 
 function dataRoot() {
-    return (
-        process.env.MC_DATA_DIR ||
-        path.resolve(import.meta.dirname, "../../../data")
-    );
+    return process.env.MC_DATA_DIR || path.resolve(import.meta.dirname, "../../../data");
 }
 
 function newRunId() {
-    const t = new Date()
-        .toISOString()
-        .replace(/[-:]/g, "")
-        .replace("T", "-")
-        .slice(0, 15); // 20261019-104512
+    const t = new Date().toISOString().replace(/[-:]/g, "").replace("T", "-").slice(0, 15); // 20261019-104512
     return `run-${t}-${crypto.randomBytes(2).toString("hex")}`;
 }
 
@@ -85,15 +77,10 @@ function collectionProblem(purpose, codeVersion) {
 
 // Called once, right after the bot spawns. `command` sends a server command (see commands.js).
 // codeVersion: the git commit (given by unit tests only).
-async function startRun(
-    bot,
-    { host, port, command, codeVersion = CODE_VERSION },
-) {
+async function startRun(bot, { host, port, command, codeVersion = CODE_VERSION }) {
     const purpose = process.env.MC_DATA_PURPOSE || "dev";
     if (!PURPOSES.includes(purpose))
-        throw new Error(
-            `MC_DATA_PURPOSE must be one of ${PURPOSES.join(", ")}, got "${purpose}"`,
-        );
+        throw new Error(`MC_DATA_PURPOSE must be one of ${PURPOSES.join(", ")}, got "${purpose}"`);
     const problem = collectionProblem(purpose, codeVersion);
     if (problem) throw new Error(problem);
     const runId = newRunId();
@@ -135,8 +122,7 @@ async function startRun(
             dimension: bot.game.dimension,
             tick_rate: bot.tickRate, // 20 unless the server says otherwise; later changes are trace events
             view_distance: bot.serverSettings?.view_distance ?? null,
-            simulation_distance:
-                bot.serverSettings?.simulation_distance ?? null,
+            simulation_distance: bot.serverSettings?.simulation_distance ?? null,
         },
         host: os.hostname(),
     };
@@ -148,12 +134,4 @@ function currentRun() {
     return current;
 }
 
-export {
-    collectionProblem,
-    currentRun,
-    dataDirFor,
-    newRunId,
-    PURPOSES,
-    startRun,
-    watchLogin,
-};
+export { collectionProblem, currentRun, dataDirFor, newRunId, PURPOSES, startRun, watchLogin };

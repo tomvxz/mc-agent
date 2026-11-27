@@ -23,15 +23,7 @@ const CAPS = {
     entities: 6000,
 }; // beyond: truncated
 
-const CONTROLS = [
-    "forward",
-    "back",
-    "left",
-    "right",
-    "jump",
-    "sprint",
-    "sneak",
-]; // bit 0 = forward...
+const CONTROLS = ["forward", "back", "left", "right", "jump", "sprint", "sneak"]; // bit 0 = forward...
 const TELEPORT_DISTANCE = 5; // a server-forced move further than this is a teleport, not a correction
 
 // Action packets sent to the server, and the fields kept for each
@@ -62,8 +54,7 @@ const ACTION_PACKETS = {
 };
 const loc = (l) => (l ? [l.x, l.y, l.z] : null);
 
-const round = (v, d = 3) =>
-    typeof v === "number" ? Math.round(v * 10 ** d) / 10 ** d : v;
+const round = (v, d = 3) => (typeof v === "number" ? Math.round(v * 10 ** d) / 10 ** d : v);
 
 // The packets the bot sends are observed by wrapping bot._client.write, once per bot.
 // Listeners registered here receive (name, packet).
@@ -168,9 +159,7 @@ function startTrace(bot) {
             () => {
                 const p = bot.entity.position;
                 const last = trace.body.rows.at(-1);
-                const jump = last
-                    ? Math.hypot(p.x - last[1], p.y - last[2], p.z - last[3])
-                    : null;
+                const jump = last ? Math.hypot(p.x - last[1], p.y - last[2], p.z - last[3]) : null;
                 if (jump === null || jump > TELEPORT_DISTANCE) {
                     event("teleport", {
                         distance: jump === null ? null : round(jump, 2),
@@ -195,21 +184,14 @@ function startTrace(bot) {
             "playerCollect",
             (collector, collected) => {
                 if (collector !== bot.entity) return;
-                const item = collected.getDroppedItem
-                    ? collected.getDroppedItem()
-                    : null;
+                const item = collected.getDroppedItem ? collected.getDroppedItem() : null;
                 event("pickup", {
                     item: item ? item.name : null,
                     count: item ? item.count : null,
                 });
             },
         ],
-        [
-            bot,
-            "kicked",
-            (reason) =>
-                event("kicked", { reason: String(reason).slice(0, 200) }),
-        ],
+        [bot, "kicked", (reason) => event("kicked", { reason: String(reason).slice(0, 200) })],
         [bot, "end", () => event("disconnected")],
         [
             bot,
@@ -241,8 +223,7 @@ function startTrace(bot) {
                 if (!e) return;
                 let controls = 0;
                 CONTROLS.forEach((c, i) => {
-                    if (bot.controlState && bot.controlState[c])
-                        controls |= 1 << i;
+                    if (bot.controlState && bot.controlState[c]) controls |= 1 << i;
                 });
                 const p = e.position;
                 const v = e.velocity;
@@ -263,15 +244,9 @@ function startTrace(bot) {
                 if (tick % ENTITY_EVERY !== 0) return;
                 const near = Object.values(bot.entities)
                     .filter(
-                        (x) =>
-                            x !== e &&
-                            x.position &&
-                            x.position.distanceTo(p) <= ENTITY_RADIUS,
+                        (x) => x !== e && x.position && x.position.distanceTo(p) <= ENTITY_RADIUS,
                     )
-                    .sort(
-                        (a, b) =>
-                            a.position.distanceTo(p) - b.position.distanceTo(p),
-                    )
+                    .sort((a, b) => a.position.distanceTo(p) - b.position.distanceTo(p))
                     .slice(0, MAX_ENTITIES);
                 for (const x of near) {
                     add("entities", trace.entities.rows, [
@@ -290,12 +265,7 @@ function startTrace(bot) {
             bot,
             "blockUpdate",
             (oldBlock, newBlock) => {
-                if (
-                    !oldBlock ||
-                    !newBlock ||
-                    oldBlock.type === newBlock.type ||
-                    !bot.entity
-                )
+                if (!oldBlock || !newBlock || oldBlock.type === newBlock.type || !bot.entity)
                     return;
                 const b = newBlock.position;
                 if (b.distanceTo(bot.entity.position) > BLOCK_RADIUS) return;
@@ -310,14 +280,11 @@ function startTrace(bot) {
             },
         ],
     ];
-    for (const [emitter, name, fn] of listeners)
-        if (emitter) emitter.on(name, fn);
+    for (const [emitter, name, fn] of listeners) if (emitter) emitter.on(name, fn);
 
     // --- Action packets
     const packets =
-        bot._client && typeof bot._client.write === "function"
-            ? watchOutgoingPackets(bot)
-            : null;
+        bot._client && typeof bot._client.write === "function" ? watchOutgoingPackets(bot) : null;
     const onPacket = (name, packet) => {
         const keep = ACTION_PACKETS[name];
         if (keep)
@@ -330,8 +297,7 @@ function startTrace(bot) {
     if (packets) packets.add(onPacket);
 
     return function stop() {
-        for (const [emitter, name, fn] of listeners)
-            if (emitter) emitter.removeListener(name, fn);
+        for (const [emitter, name, fn] of listeners) if (emitter) emitter.removeListener(name, fn);
         if (packets) packets.delete(onPacket);
         return { ...trace, truncated: [...truncated] };
     };
@@ -340,9 +306,7 @@ function startTrace(bot) {
 // What the brain is told about a trace: damage taken and death (the journal keeps the full trace)
 function summarizeForBrain(trace) {
     const events = trace ? trace.events : [];
-    const damage = events
-        .filter((e) => e.type === "health_loss")
-        .reduce((n, e) => n + e.amount, 0);
+    const damage = events.filter((e) => e.type === "health_loss").reduce((n, e) => n + e.amount, 0);
     return {
         damage_taken: round(damage, 1),
         died: events.some((e) => e.type === "death"),

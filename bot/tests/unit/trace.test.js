@@ -1,6 +1,6 @@
 // The trace (src/journal/trace.js): what happens WHILE a skill runs. It is raw material of the world model,
-// so every kind of event is checked here, and that recording a skill leaves nothing behind (no listener
-// piling up from one skill to the next). The events already covered through execute() (damage, health
+// so every kind of event is checked here, and that recording a skill leaves nothing behind.
+// The events already covered through execute() (damage, health
 // loss, teleport, correction, death) are in execute.test.js.
 import assert from "node:assert";
 import test from "node:test";
@@ -10,7 +10,13 @@ import { fakeBot } from "./fakeBot.js";
 // A fake bot with what the physics tick reads
 function tracedBot() {
     const bot = fakeBot();
-    Object.assign(bot.entity, { id: 7, yaw: 0, pitch: 0, velocity: { x: 0, y: 0, z: 0 }, onGround: true });
+    Object.assign(bot.entity, {
+        id: 7,
+        yaw: 0,
+        pitch: 0,
+        velocity: { x: 0, y: 0, z: 0 },
+        onGround: true,
+    });
     return bot;
 }
 
@@ -37,7 +43,18 @@ test("trace: pickup, heal, respawn, weather, kick, disconnection, pathfinder and
     const byType = Object.fromEntries(t.events.map((e) => [e.type, e]));
     assert.deepStrictEqual(
         t.events.map((e) => e.type),
-        ["pickup", "heal", "respawn", "weather", "kicked", "disconnected", "path_update", "path_reset", "goal_reached", "tick_rate"],
+        [
+            "pickup",
+            "heal",
+            "respawn",
+            "weather",
+            "kicked",
+            "disconnected",
+            "path_update",
+            "path_reset",
+            "goal_reached",
+            "tick_rate",
+        ],
     );
     assert.deepStrictEqual([byType.pickup.item, byType.pickup.count], ["oak_log", 2]);
     assert.deepStrictEqual([byType.heal.amount, byType.heal.health], [3, 13]);
@@ -47,25 +64,39 @@ test("trace: pickup, heal, respawn, weather, kick, disconnection, pathfinder and
     assert.strictEqual(byType.path_reset.reason, "stuck");
     assert.deepStrictEqual([byType.tick_rate.tick_rate, byType.tick_rate.frozen], [10, false]);
     // Every event has its time since the start and the world age
-    for (const e of t.events) assert.ok(Number.isFinite(e.ms) && e.tick === 5000, JSON.stringify(e));
+    for (const e of t.events)
+        assert.ok(Number.isFinite(e.ms) && e.tick === 5000, JSON.stringify(e));
 });
 
 test("trace: a block that keeps its type, or farther than 16 blocks, is not a block change", () => {
     const bot = tracedBot();
     const stop = startTrace(bot);
     const at = (dx) => bot.entity.position.floored().offset(dx, 0, 0);
-    const block = (name, dx) => ({ type: bot.registry.blocksByName[name].id, name, position: at(dx) });
+    const block = (name, dx) => ({
+        type: bot.registry.blocksByName[name].id,
+        name,
+        position: at(dx),
+    });
     bot.emit("blockUpdate", block("oak_log", 2), block("oak_log", 2)); // a state change (axis): same type
     bot.emit("blockUpdate", block("stone", 20), block("air", 20)); // too far
     bot.emit("blockUpdate", block("stone", 3), block("air", 3)); // kept
     const t = stop();
-    assert.deepStrictEqual(t.blocks.rows.map((r) => r.slice(1)), [[3, 100, 0, "stone", "air"]]);
+    assert.deepStrictEqual(
+        t.blocks.rows.map((r) => r.slice(1)),
+        [[3, 100, 0, "stone", "air"]],
+    );
 });
 
 test("trace: only the action packets are kept, with their fields", () => {
     const bot = tracedBot();
     const stop = startTrace(bot);
-    bot._client.write("window_click", { windowId: 1, slot: 4, mouseButton: 1, mode: 0, stateId: 3 });
+    bot._client.write("window_click", {
+        windowId: 1,
+        slot: 4,
+        mouseButton: 1,
+        mode: 0,
+        stateId: 3,
+    });
     bot._client.write("use_entity", { target: 12, mouse: 1 });
     bot._client.write("held_item_slot", { slotId: 2 });
     bot._client.write("position", { x: 0, y: 0, z: 0 }); // movement: not an action (it is in the body rows)
@@ -91,10 +122,20 @@ test("trace: past its cap a series is truncated, and says so", () => {
 
 test("trace: stopping removes every listener, and the packet watcher is installed once per bot", () => {
     const bot = tracedBot();
-    const watched = ["physicsTick", "health", "blockUpdate", "playerCollect", "forcedMove", "death"];
+    const watched = [
+        "physicsTick",
+        "health",
+        "blockUpdate",
+        "playerCollect",
+        "forcedMove",
+        "death",
+    ];
     const before = watched.map((name) => bot.listenerCount(name));
     for (let i = 0; i < 3; i++) startTrace(bot)(); // three skills, one after the other
-    assert.deepStrictEqual(watched.map((name) => bot.listenerCount(name)), before);
+    assert.deepStrictEqual(
+        watched.map((name) => bot.listenerCount(name)),
+        before,
+    );
     // A packet sent during the NEXT skill goes into its trace only, not into a trace already stopped
     const write = bot._client.write;
     const first = startTrace(bot)();
@@ -112,6 +153,9 @@ test("trace: the brain's summary adds the health losses and says if the bot died
         { type: "health_loss", amount: 4 },
     ];
     assert.deepStrictEqual(summarizeForBrain({ events }), { damage_taken: 6.5, died: false });
-    assert.deepStrictEqual(summarizeForBrain({ events: [{ type: "death" }] }), { damage_taken: 0, died: true });
+    assert.deepStrictEqual(summarizeForBrain({ events: [{ type: "death" }] }), {
+        damage_taken: 0,
+        died: true,
+    });
     assert.deepStrictEqual(summarizeForBrain(null), { damage_taken: 0, died: false }); // unknown skill: no trace
 });
