@@ -1,29 +1,31 @@
 # Journal format
 
-The journal is the raw material of the world model and of the future shared latent space.
+The journal is the raw material for training.
 JSONL files (one JSON object per line), **append-only, never rewritten**.
 
 ## Where the data goes
+
 One **run** = one launch of the bot process (`bot.js`). Its purpose comes from `MC_DATA_PURPOSE`:
 
-| Purpose | Folder | Meaning |
-|---|---|---|
-| `dev` (default) | `data/dev/` | everything produced while building the bot: **disposable**, never used for training |
-| `collection` | `data/collection/<run_id>/` | a real collection run; one folder per run (a failed run is deleted as a whole) |
+| Purpose         | Folder                      | Meaning                                                                             |
+| --------------- | --------------------------- | ----------------------------------------------------------------------------------- |
+| `dev` (default) | `data/dev/`                 | everything produced while building the bot: **disposable**, never used for training |
+| `collection`    | `data/collection/<run_id>/` | a real collection run; one folder per run (a failed run is deleted as a whole)      |
 
 Each folder holds:
 
-| File | Written by | One line = |
-|---|---|---|
-| `runs.jsonl` | Node (`bot/src/journal/run.js`) | one run (launch of the bot): its fixed facts |
+| File                | Written by                            | One line =                                                       |
+| ------------------- | ------------------------------------- | ---------------------------------------------------------------- |
+| `runs.jsonl`        | Node (`bot/src/journal/run.js`)       | one run (launch of the bot): its fixed facts                     |
 | `transitions.jsonl` | Node (`bot/src/execution/execute.js`) | one skill execution, complete (state, trace, next state, result) |
-| `episodes.jsonl` | Python (`brain/journal.py`) | one event of an LLM episode |
+| `episodes.jsonl`    | Python (`brain/journal.py`)           | one event of an LLM episode                                      |
 
 Joins: transition -> run on `run_id` (versions, seed, server settings); transition -> episode on
 `episode_id` + `turn`; transitions of a run are ordered by `seq` (start order; the steps inside a skill carry `parent_seq`).
 `MC_DATA_DIR` changes the `data/` root. Older lines (schemas 1-3) are development data: ignore them.
 
 ## Rules
+
 - **One state format.** `observe(bot)` (bot/src/observation/state.js) is the single definition of the state:
   `GET /state`, `state` and `next_state` all use it. The LLM does not read it raw: the brain renders
   a short text from it for the prompt (a view, not a second format; the exact prompt is in episodes).
@@ -32,18 +34,17 @@ Joins: transition -> run on `run_id` (versions, seed, server settings); transiti
   JSONL stays the untouched raw source.
 - Every line carries `schema_version`. Changing the shape of a line = bump the version; old lines
   stay as they are and readers must handle every version.
-- Record what cannot be recomputed later; **never store what can be recomputed exactly** from other
-  fields (two copies of one fact end up disagreeing). See "Derived at load time" below. The one
+- Record what cannot be recomputed later; **avoid storing what can be recomputed exactly** from other
+  fields, to reduce storage and prevent possible mismatch. See "Derived at load time" below. The one
   deliberate exception: `next_state` (its grid could almost be rebuilt from `state` + `trace.blocks`)
-  is kept because (`state`, `next_state`) in one format is exactly what the world model learns,
+  is kept because (`state`, `next_state`) in one format is exactly what the model learns,
   and block-change capture can be incomplete.
-- Never filter failures: failed skills, malformed LLM answers and crashes are data.
+- Never filter failures: failed skills, malformed LLM answers and crashes are data, and should be easily filtered depending on task.
 - A line whose trace has a `death`, `teleport`, `kicked` or `disconnected` event does not describe
   the effect of the skill alone: filter or weight it.
 - **The format evolves with the project, it is never frozen**: each change is a new `schema_version`
   described below, old lines are never rewritten, and the code reading the journal (the world model) says
-  which versions it reads (and how it maps old fields or skill names). A small collection is a test of the
-  chain, not a commitment on the format.
+  which versions it reads (and how it maps old fields or skill names). Changing it deeply or too often should be avoided though, especially once training has started.
 - Timestamps are ISO 8601 in UTC (`2026-10-19T10:45:12.345Z`); durations are in seconds; game
   times are in ticks (`bot.time.age`, 20 ticks = 1 s at the normal tick rate); trace times are in
   milliseconds since the start of the skill (`ms`).
@@ -52,28 +53,44 @@ Joins: transition -> run on `run_id` (versions, seed, server settings); transiti
   wall-clock time and ignore the server's tick rate, so a faster server distorts the data.
 
 ## `runs.jsonl` (schema 1)
+
 Written once per run, right after the bot spawns: the run's fixed facts, not repeated on every line.
+
 ```jsonc
-{ "schema_version": 1, "type": "run_start", "run_id": "run-20261019-104512-a3f9", "ts": "…",
-  "purpose": "dev",                         // dev | collection
-  "data_dir": "/…/data/dev",
-  "bot": "Agent",                           // one bot per run
-  "world_id": "localhost:25565",            // MC_WORLD_ID, or host:port of the server
-  "world_seed": "-1234567890",              // from /seed (null if unavailable)
-  "versions": {
-    "code": "6fc30a3+dirty",                // git commit; "+dirty" = uncommitted changes in bot/ or brain/
-    "minecraft": "1.21.11", "server": "This server is running Paper version …",
-    "mineflayer": "4.39.0", "pathfinder": "2.4.5", "node": "v26.5.0" },
-  "game": { "difficulty": "hard",            // the WORLD's difficulty (can differ from server.properties)
-            "game_mode": "survival", "dimension": "overworld",
-            "tick_rate": 20,                  // at start; changes appear as trace events
-            "view_distance": 3, "simulation_distance": 3 },   // as announced by the server at login
-  "host": "machine-name" }
+{
+    "schema_version": 1,
+    "type": "run_start",
+    "run_id": "run-20261019-104512-a3f9",
+    "ts": "…",
+    "purpose": "dev", // dev | collection
+    "data_dir": "/…/data/dev",
+    "bot": "Agent", // one bot per run
+    "world_id": "localhost:25565", // MC_WORLD_ID, or host:port of the server
+    "world_seed": "-1234567890", // from /seed (null if unavailable)
+    "versions": {
+        "code": "6fc30a3+dirty", // git commit; "+dirty" = uncommitted changes in bot/ or brain/
+        "minecraft": "1.21.11",
+        "server": "This server is running Paper version …",
+        "mineflayer": "4.39.0",
+        "pathfinder": "2.4.5",
+        "node": "v26.5.0",
+    },
+    "game": {
+        "difficulty": "hard", // the WORLD's difficulty (can differ from server.properties)
+        "game_mode": "survival",
+        "dimension": "overworld",
+        "tick_rate": 20, // at start; changes appear as trace events
+        "view_distance": 3,
+        "simulation_distance": 3,
+    }, // as announced by the server at login
+    "host": "machine-name",
+}
 ```
 
 ## `transitions.jsonl`
 
 ### Version 11 (current)
+
 ```jsonc
 {
   "schema_version": 11,
@@ -112,8 +129,9 @@ Written once per run, right after the bot spawns: the run's fixed facts, not rep
 ```
 
 #### Steps: the skills called inside a skill
+
 A shortcut is an assembly of primitives: each primitive it calls gets its own line (`bot/src/execution/steps.js`),
-so the world model also learns from short actions when the brain asked for `mine` 10. A step line has
+so the model also learns from short actions when the brain asked for a longer skill. A step line has
 `parent_seq` (the seq of the skill that called it, which may itself be a step), the same `source`,
 `episode_id` and `turn`, its own `state`, `next_state`, result and times, and `trace: null`: its trace is
 the part of the top line's trace between its `tick_start` and `tick_end`. No wait after a step
@@ -126,10 +144,12 @@ Lines are written when a skill ENDS: a step's line comes before its parent's, an
 The brain's tools (`brain/show.py`, `brain/bench.py`) read only the top lines (no `parent_seq`).
 
 #### `state` / `next_state`: the state (from `observe`)
+
 Every field may be `null` if it could not be read. The state holds everything the CLIENT knows: the
 server sends every block of the loaded chunks and every entity around, walls or not. What the bot
 could SEE is marked (`blocks.visible`, `visible` of entities): a perception that sees only that is a
 mask over the same line, not a second format (`bot/src/observation/perception.js`).
+
 ```jsonc
 {
   "perception": "sight",                // how find, scan and the brain's view filter what is known:
@@ -184,6 +204,7 @@ mask over the same line, not a second format (`bot/src/observation/perception.js
     "visible": "AAAA…" }                // base64, one bit per cell: cell i is byte i >> 3, bit i & 7 (1 = seen)
 }
 ```
+
 Grid order: `for dy in -R..R, for dz in -R..R, for dx in -R..R`, i.e.
 `index = (dy+R)*S*S + (dz+R)*S + (dx+R)` with `S = 2R+1`. Cell `(dx, dy, dz)` is the block at
 `origin + (dx, dy, dz)`; `dy = -1` is the block under the feet (the block below and the one in front
@@ -200,8 +221,10 @@ changes, usually underwater). Only loaded chunks are known (view distance 3: abo
 the bot).
 
 #### `trace`: what happened during the skill
+
 Time series are stored as columns: `{ "fields": [...], "rows": [[...], ...] }`. `ms` = milliseconds
 since the start of the skill.
+
 ```jsonc
 {
   "events": [ { "ms": 120, "tick": 1203347, "type": "damage", … } ],
@@ -213,6 +236,7 @@ since the start of the skill.
   "truncated": []                       // names of the parts that hit their cap (events 500, body 6000,
 }                                       //   actions 1000, blocks 2000, entities 6000)
 ```
+
 - **`body.controls`**: the control keys held at that tick, as bits: forward 1, back 2, left 4,
   right 8, jump 16, sprint 32, sneak 64 (17 = forward + jump). Movement is computed by the client
   and only positions reach the server, so the keys are read from the bot itself.
@@ -225,40 +249,42 @@ since the start of the skill.
 - **`entities`**: entities within 16 blocks every 5 ticks (about 4 times a second), at most 20.
 - **`events`**:
 
-| type | fields | meaning |
-|---|---|---|
-| `damage` | `damage_type_id`, `source` | the bot was hurt (cause from the damage_event packet; source = entity name or null) |
-| `health_loss` / `heal` | `amount`, `health` | health went down / up |
-| `death`, `respawn` | | |
-| `teleport` | `distance` | the server moved the bot more than 5 blocks (/tp, respawn...) |
-| `correction` | `distance` | the server refused a move and put the bot back (less than 5 blocks). A few are normal; many in a row = the bot is stuck (cause found and fixed: `fixWallContact` in bot/src/game/fixes.js) |
-| `weather` | `raining`, `rain_level`, `thunder` | the weather changed during the skill |
-| `pickup` | `item`, `count` | the bot picked up an item |
-| `path_update` | `status`, `length`, `visited` | the pathfinder (re)planned |
-| `path_reset` | `reason` | the pathfinder dropped its path (stuck, block_updated...) |
-| `goal_reached` | | |
-| `tick_rate` | `tick_rate`, `frozen` | the server changed its tick rate (the data is then unreliable) |
-| `kicked`, `disconnected` | `reason` | |
+| type                     | fields                             | meaning                                                                                                                                                                                    |
+| ------------------------ | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `damage`                 | `damage_type_id`, `source`         | the bot was hurt (cause from the damage_event packet; source = entity name or null)                                                                                                        |
+| `health_loss` / `heal`   | `amount`, `health`                 | health went down / up                                                                                                                                                                      |
+| `death`, `respawn`       |                                    |                                                                                                                                                                                            |
+| `teleport`               | `distance`                         | the server moved the bot more than 5 blocks (/tp, respawn...)                                                                                                                              |
+| `correction`             | `distance`                         | the server refused a move and put the bot back (less than 5 blocks). A few are normal; many in a row = the bot is stuck (cause found and fixed: `fixWallContact` in bot/src/game/fixes.js) |
+| `weather`                | `raining`, `rain_level`, `thunder` | the weather changed during the skill                                                                                                                                                       |
+| `pickup`                 | `item`, `count`                    | the bot picked up an item                                                                                                                                                                  |
+| `path_update`            | `status`, `length`, `visited`      | the pathfinder (re)planned                                                                                                                                                                 |
+| `path_reset`             | `reason`                           | the pathfinder dropped its path (stuck, block_updated...)                                                                                                                                  |
+| `goal_reached`           |                                    |                                                                                                                                                                                            |
+| `tick_rate`              | `tick_rate`, `frozen`              | the server changed its tick rate (the data is then unreliable)                                                                                                                             |
+| `kicked`, `disconnected` | `reason`                           |                                                                                                                                                                                            |
 
-### Derived at load time (do NOT add these to the journal)
-| Field | Computed from |
-|---|---|
-| transition id, previous transition | `run_id` + `seq` (previous at the same level: the nearest smaller `seq` with the same `parent_seq`) |
-| code version (git commit), world, bot, seed, tick rate at start | `runs.jsonl` via `run_id` |
-| step within an episode | order of `seq` among lines with the same `episode_id` |
-| items gained / lost, health / food change | `next_state` - `state` |
-| ticks used | `tick_end - tick_start` |
-| server health (ticks per second) | `(tick_end - tick_start) / (ended_at - started_at)`: about 20 when healthy; far below = server lag or the machine slept (seen in a pilot: 0 ticks over 640 s) -> discard |
-| distance / height to a target, tools needed, recipe ingredients, preconditions | `state` + `skill.args_resolved` + game data |
-| died, death cause, damage taken, hits | `trace.events` |
-| replans, explored nodes, time stuck | `trace.events` (`path_update`), `trace.body` |
-| hostiles nearby (count) | `state.entities` |
-| what the brain was told about damage / death (`body_events` in the API answer) | `trace.events` |
-| last n results, ticks since last damage/meal, deaths so far | previous lines (`seq`) + their traces |
+### Derived at load time
+
+| Field                                                                          | Computed from                                                                                                                                                            |
+| ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| transition id, previous transition                                             | `run_id` + `seq` (previous at the same level: the nearest smaller `seq` with the same `parent_seq`)                                                                      |
+| code version (git commit), world, bot, seed, tick rate at start                | `runs.jsonl` via `run_id`                                                                                                                                                |
+| step within an episode                                                         | order of `seq` among lines with the same `episode_id`                                                                                                                    |
+| items gained / lost, health / food change                                      | `next_state` - `state`                                                                                                                                                   |
+| ticks used                                                                     | `tick_end - tick_start`                                                                                                                                                  |
+| server health (ticks per second)                                               | `(tick_end - tick_start) / (ended_at - started_at)`: about 20 when healthy; far below = server lag or the machine slept (seen in a pilot: 0 ticks over 640 s) -> discard |
+| distance / height to a target, tools needed, recipe ingredients, preconditions | `state` + `skill.args_resolved` + game data                                                                                                                              |
+| died, death cause, damage taken, hits                                          | `trace.events`                                                                                                                                                           |
+| replans, explored nodes, time stuck                                            | `trace.events` (`path_update`), `trace.body`                                                                                                                             |
+| hostiles nearby (count)                                                        | `state.entities`                                                                                                                                                         |
+| what the brain was told about damage / death (`body_events` in the API answer) | `trace.events`                                                                                                                                                           |
+| last n results, ticks since last damage/meal, deaths so far                    | previous lines (`seq`) + their traces                                                                                                                                    |
 
 (`timed_out` is the one exception kept on purpose: it equals `reason == "timeout"` but makes filters readable.)
 
 ### Earlier versions
+
 v10 (2026-11-12 to 2026-11-16, the first trial collection): `state.oxygen` came from Mineflayer's
 `bot.oxygenLevel`, which follows the air of ANY entity nearby (a Mineflayer bug, see `botOxygen` in
 `bot/src/game/fixes.js`): values up to 400, and a value in 0-20 may be another entity's too. Read v10
@@ -283,6 +309,7 @@ run-level fields on every line, `events` instead of `trace`. v2: no trace, conte
 reliability fields. v1: the first format. All are development data: ignore them for training.
 
 ## Which code produced the data
+
 The git commit (`versions.code` in runs.jsonl, `code_version` in episodes) identifies the skills, the
 catalogue texts and everything else exactly; `git diff` between two commits tells what changed.
 There are no hand-written version numbers per skill or for the catalogue (they could lie: a fix in
@@ -294,18 +321,20 @@ Before October 20, 2026, lines also had `versions.catalogue`, `versions.skills` 
 ## `episodes.jsonl`
 
 ### Version 2 (current)
+
 An episode is a stream of events, each written as soon as it happens (nothing is lost if the
 program crashes mid-episode). Every event has:
 
-| Field | Meaning |
-|---|---|
-| `schema_version` | 2 |
-| `type` | `episode_start`, `llm_turn` or `episode_end` |
-| `episode_id` | e.g. `ep-20261019-104512-a3f9` (UTC date-time + 4 random hex characters) |
-| `seq` | 0, 1, 2... order of the events within the episode |
-| `ts` | when the event was written |
+| Field            | Meaning                                                                  |
+| ---------------- | ------------------------------------------------------------------------ |
+| `schema_version` | 2                                                                        |
+| `type`           | `episode_start`, `llm_turn` or `episode_end`                             |
+| `episode_id`     | e.g. `ep-20261019-104512-a3f9` (UTC date-time + 4 random hex characters) |
+| `seq`            | 0, 1, 2... order of the events within the episode                        |
+| `ts`             | when the event was written                                               |
 
 `episode_start`, written once, before the first LLM call:
+
 ```jsonc
 { "schema_version": 2, "type": "episode_start", "episode_id": "ep-…", "seq": 0, "ts": "…",
   "run_id": "run-…",                          // the body's run (null if unknown)
@@ -322,6 +351,7 @@ program crashes mid-episode). Every event has:
 ```
 
 `llm_turn`, one per call to the LLM:
+
 ```jsonc
 { "schema_version": 2, "type": "llm_turn", "episode_id": "ep-…", "seq": 1, "ts": "…",
   "turn": 0,
@@ -338,6 +368,7 @@ program crashes mid-episode). Every event has:
   "latency": 2.4,               // seconds spent waiting for the LLM
   "tokens": { "prompt": 1830, "completion": 95 } }   // null if the provider does not say
 ```
+
 The exact prompt of turn `n` is its `messages` + the `tools` of `episode_start`. The skill calls of
 the plan are the transitions with the same `episode_id` and `turn`.
 
@@ -351,6 +382,7 @@ An unusable definition is not asked again: `parse_error` says why, and the episo
 a condition (the LLM's goal_reached).
 
 Messages use the OpenAI chat format:
+
 ```jsonc
 { "role": "user", "content": "Goal: …\n\nPosition: …" }                    // goal, new state, error feedback
 { "role": "assistant", "content": "",                                       // the LLM's previous answer,
@@ -358,6 +390,7 @@ Messages use the OpenAI chat format:
                     "function": { "name": "find", "arguments": "{\"target\": \"oak_log\"}" } } ] }
 { "role": "tool", "tool_call_id": "call_ab12", "content": "find(target='oak_log'): ok {…}" }  // one per call
 ```
+
 An unusable answer is put back as `{ "role": "assistant", "content": "<its text>" }`.
 Text written next to the calls (some models write some, unasked) is not put back: `content` is `""`
 when there are `tool_calls` (Ollama's templates cannot show both). It stays in `raw_response` only,
@@ -369,6 +402,7 @@ messages ADDED since the previous turn (turn `n` = `system_prompt` + the `new_me
 message).
 
 `episode_end`, written once, also after a crash when possible:
+
 ```jsonc
 { "schema_version": 2, "type": "episode_end", "episode_id": "ep-…", "seq": 9, "ts": "…",
   "outcome": {
@@ -381,6 +415,7 @@ message).
   },
   "final_state": { … } }          // observe() at the end, or null
 ```
+
 `brain/journal.py` writes an `episode_end` automatically (reason `crash` or `interrupted`) when
 the code exits on an exception. An episode without `episode_end` was killed hard (process killed).
 

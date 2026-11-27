@@ -1,65 +1,65 @@
 {
-  "about": [
-    "The fields the brain (Python) READS in the body's API answers (bot/src/api/api.js), with their types.",
-    "Checked on both sides, so that the two cannot drift apart without a test failing:",
-    "  bot/tests/unit/contract.test.js: the real API answers have every field listed here, with this type;",
-    "  brain/tests/test_contract.py: the fake body of the Python tests (brain/tests/fakes.py) too.",
-    "Types: string, number, boolean, object, array, null; 'a|b' = either. A nested object = the fields of that",
-    "object; '*' = every entry of an object; a list with one element = every item of a list.",
-    "A field ending with '?' may be left out by the FAKE body (the brain reads it with .get); the real API",
-    "always sends it. Extra fields are allowed: this is what the brain needs, not all that the body sends.",
-    "Not here: POST /setup (only used by the benches, and its server commands cannot run in a unit test)."
-  ],
-  "GET /run": {
-    "run_id": "string",
-    "purpose": "string",
-    "data_dir": "string"
-  },
-  "GET /skills": {
-    "common_reasons": "object",
-    "skills": {
-      "*": {
-        "description": "string",
-        "parameters": { "type": "string", "properties": "object" },
-        "reasons": "object"
-      }
-    }
-  },
-  "GET /state": {
-    "position": "array",
-    "health": "number",
-    "food": "number",
-    "time_of_day": "number|null",
-    "inventory": "object",
-    "held_item": "object|null",
-    "raining": "boolean",
-    "thunder": "boolean",
-    "perception": "string",
-    "deaths?": "number|null",
-    "entities": [
-      {
-        "name": "string",
-        "hostile": "boolean",
-        "offset": "array",
-        "distance": "number",
-        "visible": "boolean|null"
-      }
+    "about": [
+        "The fields the brain (Python) READS in the body's API answers (bot/src/api/api.js), with their types.",
+        "Checked on both sides, so that the two cannot drift apart without a test failing:",
+        "  bot/tests/unit/contract.test.js: the real API answers have every field listed here, with this type;",
+        "  brain/tests/test_contract.py: the fake body of the Python tests (brain/tests/fakes.py) too.",
+        "Types: string, number, boolean, object, array, null; 'a|b' = either. A nested object = the fields of that",
+        "object; '*' = every entry of an object; a list with one element = every item of a list.",
+        "A field ending with '?' may be left out by the FAKE body (the brain reads it with .get); the real API",
+        "always sends it. Extra fields are allowed: this is what the brain needs, not all that the body sends.",
+        "Not here: POST /setup (only used by the benches, and its server commands cannot run in a unit test)."
     ],
-    "in_sight": {
-      "*": { "count": "number", "nearest": "array", "distance": "number" }
+    "GET /run": {
+        "run_id": "string",
+        "purpose": "string",
+        "data_dir": "string"
     },
-    "blocks": {
-      "origin": "array",
-      "radius": "number",
-      "palette": "array",
-      "cells": "array"
+    "GET /skills": {
+        "common_reasons": "object",
+        "skills": {
+            "*": {
+                "description": "string",
+                "parameters": { "type": "string", "properties": "object" },
+                "reasons": "object"
+            }
+        }
+    },
+    "GET /state": {
+        "position": "array",
+        "health": "number",
+        "food": "number",
+        "time_of_day": "number|null",
+        "inventory": "object",
+        "held_item": "object|null",
+        "raining": "boolean",
+        "thunder": "boolean",
+        "perception": "string",
+        "deaths?": "number|null",
+        "entities": [
+            {
+                "name": "string",
+                "hostile": "boolean",
+                "offset": "array",
+                "distance": "number",
+                "visible": "boolean|null"
+            }
+        ],
+        "in_sight": {
+            "*": { "count": "number", "nearest": "array", "distance": "number" }
+        },
+        "blocks": {
+            "origin": "array",
+            "radius": "number",
+            "palette": "array",
+            "cells": "array"
+        }
+    },
+    "POST /execute": {
+        "success": "boolean",
+        "reason": "string",
+        "details": "object",
+        "duration": "number",
+        "body_events?": { "damage_taken": "number", "died": "boolean" }
     }
-  },
-  "POST /execute": {
-    "success": "boolean",
-    "reason": "string",
-    "details": "object",
-    "duration": "number",
-    "body_events?": { "damage_taken": "number", "died": "boolean" }
-  }
 }
